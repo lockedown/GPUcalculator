@@ -1,3 +1,5 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -5,10 +7,18 @@ from app.config import settings
 from app.db.database import create_tables
 from app.api.routes import hardware, benchmarks, calculate, compare, networking, prices, export
 
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    create_tables()
+    yield
+
+
 app = FastAPI(
     title=settings.PROJECT_NAME,
     openapi_url=f"{settings.API_V1_PREFIX}/openapi.json",
     docs_url=f"{settings.API_V1_PREFIX}/docs",
+    lifespan=lifespan,
 )
 
 app.add_middleware(
@@ -26,11 +36,6 @@ app.include_router(compare.router, prefix=settings.API_V1_PREFIX, tags=["compare
 app.include_router(networking.router, prefix=settings.API_V1_PREFIX, tags=["networking"])
 app.include_router(prices.router, prefix=settings.API_V1_PREFIX, tags=["prices"])
 app.include_router(export.router, prefix=settings.API_V1_PREFIX, tags=["export"])
-
-
-@app.on_event("startup")
-async def startup():
-    create_tables()
 
 
 @app.get("/health")
