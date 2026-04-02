@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_db
@@ -34,7 +34,6 @@ def get_gpu_prices(gpu_id: int, db: Session = Depends(get_db)):
     """Get price history for a specific GPU."""
     gpu = db.query(GPU).filter(GPU.id == gpu_id).first()
     if not gpu:
-        from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="GPU not found")
     prices = (
         db.query(PriceHistory)

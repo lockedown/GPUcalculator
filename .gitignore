@@ -49,5 +49,8 @@ htmlcov/
 .coverage
 .pytest_cache/
 
+# Vercel
+.vercel/
+
 # Windsurf
 .windsurf/

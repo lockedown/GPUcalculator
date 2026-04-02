@@ -40,4 +40,11 @@ app.include_router(export.router, prefix=settings.API_V1_PREFIX, tags=["export"]
 
 @app.get("/health")
 async def health():
-    return {"status": "ok"}
+    from app.db.database import SessionLocal
+    try:
+        db = SessionLocal()
+        db.execute(__import__("sqlalchemy").text("SELECT 1"))
+        db.close()
+        return {"status": "ok", "db": "connected"}
+    except Exception as e:
+        return {"status": "degraded", "db": str(e)}

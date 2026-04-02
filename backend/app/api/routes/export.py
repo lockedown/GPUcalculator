@@ -4,7 +4,7 @@ import csv
 import io
 from datetime import datetime
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
@@ -15,16 +15,14 @@ from app.engine.optimizer import run_comparison
 router = APIRouter()
 
 
-class ExportRequest(WorkloadInput):
-    """Extends WorkloadInput with optional constraints for export."""
-    pass
-
-
 @router.post("/export/csv")
 def export_csv(workload: WorkloadInput, db: Session = Depends(get_db)):
     """Export comparison results as a CSV file."""
-    constraints = ConstraintInput()
-    comparison = run_comparison(db, workload, constraints)
+    try:
+        constraints = ConstraintInput()
+        comparison = run_comparison(db, workload, constraints)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Comparison failed: {e}")
 
     buf = io.StringIO()
     writer = csv.writer(buf)
@@ -84,8 +82,11 @@ def export_csv(workload: WorkloadInput, db: Session = Depends(get_db)):
 @router.post("/export/json")
 def export_json(workload: WorkloadInput, db: Session = Depends(get_db)):
     """Export full comparison results as JSON report."""
-    constraints = ConstraintInput()
-    comparison = run_comparison(db, workload, constraints)
+    try:
+        constraints = ConstraintInput()
+        comparison = run_comparison(db, workload, constraints)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Comparison failed: {e}")
 
     return {
         "generated_at": datetime.now().isoformat(),
