@@ -1,6 +1,5 @@
 import os
 from pathlib import Path
-from pydantic_settings import BaseSettings
 
 
 def _parse_cors() -> list[str]:
@@ -14,7 +13,7 @@ def _parse_cors() -> list[str]:
 _DB_URL = os.getenv("DATABASE_URL", "sqlite:///./gpu_optimizer.db")
 
 
-class Settings(BaseSettings):
+class Settings:
     PROJECT_NAME: str = "GPU Deployment Optimizer"
     API_V1_PREFIX: str = "/api"
     DATABASE_URL: str = _DB_URL
@@ -22,10 +21,7 @@ class Settings(BaseSettings):
     BENCHMARK_HTML_PATH: str = str(
         Path(__file__).resolve().parent.parent.parent / "Finance GPU Benchmark Matrix.html"
     )
-
-    class Config:
-        env_file = ".env"
+    CORS_ORIGINS: list[str] = _parse_cors()
 
 
 settings = Settings()
-settings.CORS_ORIGINS = _parse_cors()
