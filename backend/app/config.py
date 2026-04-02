@@ -8,7 +8,7 @@ def _parse_cors() -> list[str]:
     raw = os.getenv("CORS_ORIGINS", "")
     if raw:
         return [o.strip() for o in raw.split(",") if o.strip()]
-    return ["http://localhost:3000", "http://127.0.0.1:3000"]
+    return ["http://localhost:3000", "http://127.0.0.1:3000", "https://gpu-calc.vercel.app"]
 
 
 _DB_URL = os.getenv("DATABASE_URL", "sqlite:///./gpu_optimizer.db")
