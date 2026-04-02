@@ -129,6 +129,48 @@ export default function WorkloadForm() {
           </div>
         </div>
 
+        {/* MoE row */}
+        <div className="mt-4 flex flex-wrap items-end gap-4">
+          <label className="flex items-center gap-2 text-[11px] font-medium text-gray-500 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={workload.is_moe}
+              onChange={(e) => setWorkload({ is_moe: e.target.checked })}
+              className="rounded border-gray-300"
+            />
+            Mixture-of-Experts (MoE)
+          </label>
+          {workload.is_moe && (
+            <>
+              <div className="flex flex-col gap-1.5">
+                <label className="text-[11px] font-medium text-gray-500">Total Experts</label>
+                <Input
+                  type="number"
+                  min={2}
+                  max={128}
+                  value={workload.num_experts}
+                  onChange={(e) => setWorkload({ num_experts: +e.target.value || 8 })}
+                  className="w-20"
+                />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <label className="text-[11px] font-medium text-gray-500">Active Experts</label>
+                <Input
+                  type="number"
+                  min={1}
+                  max={workload.num_experts}
+                  value={workload.active_experts}
+                  onChange={(e) => setWorkload({ active_experts: +e.target.value || 2 })}
+                  className="w-20"
+                />
+              </div>
+              <span className="text-[10px] text-gray-400 pb-2">
+                {workload.active_experts}/{workload.num_experts} active — effective {((workload.active_experts / workload.num_experts) * workload.model_params_b).toFixed(0)}B params/token
+              </span>
+            </>
+          )}
+        </div>
+
         <Button onClick={runComparison} disabled={loading} className="mt-4" size="sm">
           {loading ? (
             <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Calculating…</>

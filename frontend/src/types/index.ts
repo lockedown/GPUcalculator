@@ -74,6 +74,9 @@ export interface WorkloadInput {
   concurrent_users: number;
   workload_type: string;
   batch_size: number;
+  is_moe: boolean;
+  num_experts: number;
+  active_experts: number;
   finance_benchmark_category: string | null;
 }
 
@@ -143,6 +146,7 @@ export interface GPUResult {
   topology: TopologyResult | null;
   rack_plan: RackPlanResult | null;
   benchmark_scores: Record<string, number> | null;
+  is_estimated: boolean;
   warnings: string[];
 }
 

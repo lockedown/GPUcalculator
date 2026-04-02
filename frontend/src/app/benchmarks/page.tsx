@@ -1,8 +1,14 @@
-"use client";
-
+import { fetchAllGPUs, fetchAllBenchmarks } from "@/lib/server-api";
 import BenchmarkMatrix from "@/components/charts/BenchmarkMatrix";
 
-export default function BenchmarksPage() {
+export const revalidate = 300;
+
+export default async function BenchmarksPage() {
+  const [benchmarks, gpus] = await Promise.all([
+    fetchAllBenchmarks(),
+    fetchAllGPUs(),
+  ]);
+
   return (
     <div className="space-y-5">
       <div>
@@ -11,7 +17,7 @@ export default function BenchmarksPage() {
           Finance GPU Benchmark Matrix — NVIDIA Hopper/Blackwell vs AMD Instinct across quantitative, risk, AI inference, HPC, trading, and tokenization workloads.
         </p>
       </div>
-      <BenchmarkMatrix />
+      <BenchmarkMatrix initialBenchmarks={benchmarks} initialGpus={gpus} />
     </div>
   );
 }

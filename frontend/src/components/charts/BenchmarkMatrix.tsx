@@ -21,18 +21,27 @@ interface MatrixRow {
   cells: Record<string, BenchmarkWithGPU>;
 }
 
-export default function BenchmarkMatrix() {
-  const [benchmarks, setBenchmarks] = useState<BenchmarkWithGPU[]>([]);
-  const [gpus, setGpus] = useState<GPU[]>([]);
+interface BenchmarkMatrixProps {
+  initialBenchmarks?: BenchmarkWithGPU[];
+  initialGpus?: GPU[];
+}
+
+export default function BenchmarkMatrix({ initialBenchmarks, initialGpus }: BenchmarkMatrixProps = {}) {
+  const [benchmarks, setBenchmarks] = useState<BenchmarkWithGPU[]>(initialBenchmarks ?? []);
+  const [gpus, setGpus] = useState<GPU[]>(initialGpus ?? []);
   const [category, setCategory] = useState<string | null>(null);
   const [showNvidia, setShowNvidia] = useState(true);
   const [showAmd, setShowAmd] = useState(true);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!initialBenchmarks);
 
   useEffect(() => {
+    // If category filter is set, fetch filtered data client-side
+    // If we have initial data and no filter, skip fetch
+    if (!category && initialBenchmarks && initialGpus) return;
+    setLoading(true);
     Promise.all([
       api.benchmarks.list(category ? { category } : undefined),
-      api.hardware.list(),
+      initialGpus ? Promise.resolve(initialGpus) : api.hardware.list(),
     ]).then(([b, g]) => {
       setBenchmarks(b);
       setGpus(g);

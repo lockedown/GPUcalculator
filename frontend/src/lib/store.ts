@@ -50,6 +50,9 @@ const DEFAULT_WORKLOAD: WorkloadInput = {
   concurrent_users: 1,
   workload_type: "inference",
   batch_size: 1,
+  is_moe: false,
+  num_experts: 8,
+  active_experts: 2,
   finance_benchmark_category: null,
 };
 

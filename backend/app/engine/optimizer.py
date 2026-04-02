@@ -197,6 +197,11 @@ def evaluate_gpu(
 
     # --- Performance: first pass with concurrent KV cache for sizing ---
     total_sequences = workload.concurrent_users * workload.batch_size
+    moe_kwargs = dict(
+        is_moe=workload.is_moe,
+        num_experts=workload.num_experts,
+        active_experts=workload.active_experts,
+    )
     perf_sizing = calculate_performance(
         params_b=workload.model_params_b,
         precision=workload.precision,
@@ -206,6 +211,7 @@ def evaluate_gpu(
         mem_bandwidth_tb_s=gpu.mem_bandwidth_tb_s,
         hbm_capacity_gb=gpu.hbm_capacity_gb,
         gpu_count=1,
+        **moe_kwargs,
     )
 
     # --- Topology (uses concurrent-aware memory for sizing) ---
@@ -229,6 +235,7 @@ def evaluate_gpu(
         mem_bandwidth_tb_s=gpu.mem_bandwidth_tb_s,
         hbm_capacity_gb=gpu.hbm_capacity_gb,
         gpu_count=max(1, topo.gpu_count // topo.dp_degree),
+        **moe_kwargs,
     )
 
     # Apply calibration — per-replica throughput
@@ -285,7 +292,10 @@ def evaluate_gpu(
     if gpu.is_estimated:
         warnings.append(f"{gpu.name} specs are estimated (pre-GA)")
     if gpu.cooling_type == "liquid" and constraints.cooling_type == "air":
-        warnings.append(f"{gpu.name} requires liquid cooling")
+        if gpu.is_rack_scale:
+            warnings.append(f"{gpu.name} is incompatible with air cooling (rack-scale liquid required)")
+        else:
+            warnings.append(f"{gpu.name} requires liquid cooling")
     if not avail.meets_constraint:
         warnings.append(
             f"{gpu.name} lead time ({avail.lead_time_weeks}w) exceeds constraint"
@@ -345,6 +355,7 @@ def evaluate_gpu(
         gpu_id=gpu.id,
         gpu_name=gpu.name,
         gpu_vendor=gpu.vendor,
+        is_estimated=gpu.is_estimated or False,
         tokens_per_sec=effective_decode,
         prefill_tokens_per_sec=effective_prefill,
         decode_tokens_per_sec=effective_decode,
@@ -449,10 +460,13 @@ def _constraint_penalty(
                 penalty += HARD_CONSTRAINT_PENALTY
                 break
 
-    # Cooling mismatch (soft)
+    # Cooling mismatch
     for w in result.warnings:
-        if "requires liquid cooling" in w:
-            penalty += SOFT_CONSTRAINT_PENALTY
+        if "incompatible with air cooling" in w:
+            penalty += HARD_CONSTRAINT_PENALTY  # rack-scale: hard violation
+            break
+        elif "requires liquid cooling" in w:
+            penalty += SOFT_CONSTRAINT_PENALTY  # standard: soft penalty
             break
 
     return min(penalty, 0.9)
@@ -467,10 +481,11 @@ def _passes_all_constraints(result: GPUResult, constraints: ConstraintInput) -> 
     if constraints.max_power_per_rack_kw and power_kw:
         if power_kw > constraints.max_power_per_rack_kw:
             return False
-    if constraints.max_lead_time_weeks:
-        for w in result.warnings:
-            if "lead time" in w and "exceeds" in w:
-                return False
+    for w in result.warnings:
+        if "lead time" in w and "exceeds" in w:
+            return False
+        if "incompatible with air cooling" in w:
+            return False
     return True
 
 

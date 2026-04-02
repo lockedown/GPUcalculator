@@ -140,21 +140,34 @@ def calculate_performance(
     mem_bandwidth_tb_s: float,
     hbm_capacity_gb: float,
     gpu_count: int = 1,
+    is_moe: bool = False,
+    num_experts: int = 8,
+    active_experts: int = 2,
 ) -> PerformanceResult:
-    """Full performance calculation for a given GPU config."""
+    """Full performance calculation for a given GPU config.
+
+    For MoE models: memory sizing uses full params (all experts stored in VRAM),
+    but compute/bandwidth per token uses only the active fraction.
+    """
     arch = get_model_arch(params_b)
 
+    # Memory: all experts must be stored in VRAM
     model_mem = calc_model_memory_gb(params_b, precision)
     kv_cache = calc_kv_cache_gb(
         arch["num_layers"], arch["hidden_dim"], context_length, batch_size, precision
     )
     total_mem = model_mem + kv_cache
 
+    # Compute/bandwidth: MoE only activates a fraction of params per token
+    active_params_b = params_b
+    if is_moe and num_experts > 0:
+        active_params_b = params_b * (active_experts / num_experts)
+
     prefill_tps, is_compute_bound = calc_prefill_tokens_per_sec(
-        bf16_tflops * gpu_count, params_b, precision, mem_bandwidth_tb_s * gpu_count
+        bf16_tflops * gpu_count, active_params_b, precision, mem_bandwidth_tb_s * gpu_count
     )
     decode_tps = calc_decode_tokens_per_sec(
-        mem_bandwidth_tb_s * gpu_count, params_b, precision
+        mem_bandwidth_tb_s * gpu_count, active_params_b, precision
     )
 
     max_ctx = calc_max_context_tokens(

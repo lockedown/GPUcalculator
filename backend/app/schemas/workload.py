@@ -10,6 +10,9 @@ class WorkloadInput(BaseModel):
     concurrent_users: int = Field(1, description="Number of concurrent users/requests")
     workload_type: str = Field("inference", description="inference, training, quant, risk, hpc, trading")
     batch_size: int = Field(1, description="Batch size")
+    is_moe: bool = Field(False, description="Whether the model uses Mixture-of-Experts")
+    num_experts: int = Field(8, description="Total number of experts (MoE only)")
+    active_experts: int = Field(2, description="Number of active experts per token (MoE only)")
     finance_benchmark_category: str | None = Field(
         None, description="Optional: quant, risk, inference, hpc, trading, tokenization"
     )
@@ -79,6 +82,7 @@ class GPUResult(BaseModel):
     topology: TopologyResult | None = None
     rack_plan: RackPlanResult | None = None
     benchmark_scores: dict[str, float] | None = None
+    is_estimated: bool = False
     warnings: list[str] = []
 
 

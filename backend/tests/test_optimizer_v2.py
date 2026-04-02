@@ -632,7 +632,7 @@ class TestEvaluateGPU:
         w = WorkloadInput(model_params_b=70)
         c = ConstraintInput(cooling_type="air")
         result = evaluate_gpu(db, gpu, w, c)
-        assert any("liquid cooling" in w for w in result.warnings)
+        assert any("incompatible with air cooling" in w for w in result.warnings)
 
     def test_fp8_changes_throughput(self, db):
         gpu = db.query(GPU).filter(GPU.name == "B200 SXM").first()

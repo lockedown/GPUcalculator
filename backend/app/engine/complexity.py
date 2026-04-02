@@ -45,8 +45,13 @@ def calc_complexity(
 
     # Cooling penalty
     if gpu.cooling_type == "liquid" and user_cooling == "air":
-        penalties += 3.0
-        breakdown["cooling_mismatch"] = 3.0
+        if gpu.is_rack_scale:
+            # NVL72 rack-scale GPUs physically require liquid cooling — not optional
+            penalties += 5.0
+            breakdown["cooling_incompatible"] = 5.0
+        else:
+            penalties += 3.0
+            breakdown["cooling_mismatch"] = 3.0
 
     # FP8 support penalty
     if precision == "FP8":

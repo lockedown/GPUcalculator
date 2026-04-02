@@ -132,6 +132,11 @@ export default function ComparisonTable({ results, sweetSpot, loading }: Props) 
                         style={{ backgroundColor: GPU_COLORS[r.gpu_name] || "#6b7280" }}
                       />
                       <span className="font-semibold text-gray-900">{r.gpu_name}</span>
+                      {r.is_estimated && (
+                        <Badge variant="outline" className="gap-1 text-orange-500 border-orange-200">
+                          EST
+                        </Badge>
+                      )}
                       {isSweetSpot && (
                         <Badge variant="warning" className="gap-1">
                           <Trophy className="h-2.5 w-2.5" /> Sweet Spot
