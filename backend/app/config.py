@@ -22,10 +22,10 @@ class Settings(BaseSettings):
     BENCHMARK_HTML_PATH: str = str(
         Path(__file__).resolve().parent.parent.parent / "Finance GPU Benchmark Matrix.html"
     )
-    CORS_ORIGINS: list[str] = _parse_cors()
 
     class Config:
         env_file = ".env"
 
 
 settings = Settings()
+settings.CORS_ORIGINS = _parse_cors()
