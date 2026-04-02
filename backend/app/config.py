@@ -11,10 +11,13 @@ def _parse_cors() -> list[str]:
     return ["http://localhost:3000", "http://127.0.0.1:3000"]
 
 
+_DB_URL = os.getenv("DATABASE_URL", "sqlite:///./gpu_optimizer.db")
+
+
 class Settings(BaseSettings):
     PROJECT_NAME: str = "GPU Deployment Optimizer"
     API_V1_PREFIX: str = "/api"
-    DATABASE_URL: str = "sqlite:///./gpu_optimizer.db"
+    DATABASE_URL: str = _DB_URL
     PROJECT_ROOT: Path = Path(__file__).resolve().parent.parent.parent
     BENCHMARK_HTML_PATH: str = str(
         Path(__file__).resolve().parent.parent.parent / "Finance GPU Benchmark Matrix.html"
