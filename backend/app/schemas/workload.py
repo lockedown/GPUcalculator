@@ -8,7 +8,7 @@ class WorkloadInput(BaseModel):
     precision: str = Field("FP16", description="FP4, FP8, FP16, BF16, FP32")
     context_length: int = Field(4096, description="Context length in tokens")
     concurrent_users: int = Field(1, description="Number of concurrent users/requests")
-    workload_type: str = Field("inference", description="inference, training, quant, risk, hpc, trading")
+    workload_type: str = Field("inference", description="inference, training, pre-training, fine-tuning, quant, risk, hpc, trading")
     batch_size: int = Field(1, description="Batch size")
     is_moe: bool = Field(False, description="Whether the model uses Mixture-of-Experts")
     num_experts: int = Field(8, description="Total number of experts (MoE only)")

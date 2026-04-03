@@ -111,6 +111,53 @@ def calc_decode_tokens_per_sec(
     return tokens_per_sec
 
 
+def calc_concurrent_users_support(
+    memory_gb: float,
+    model_params_b: float,
+    precision: str,
+    context_length: int,
+    kv_cache_per_user_gb: float = 0.8,  # Default 0.6-1GB per user for 4K context
+) -> int:
+    """Calculate how many concurrent users can be supported based on VRAM.
+    
+    Phase 4: Concurrency & VRAM Math Implementation
+    - Determine Weight Footprint: Calculate based on precision
+    - Calculate Headroom: Available_KV_VRAM = GPU_Memory_GB - Weight_Footprint_GB
+    - Calculate Users: Divide Available_KV_VRAM by KV cache per user
+    """
+    # Weight footprint calculation
+    weight_footprint_gb = calc_model_memory_gb(model_params_b, precision)
+    
+    # Available VRAM for KV cache
+    available_kv_vram = memory_gb - weight_footprint_gb
+    
+    if available_kv_vram <= 0:
+        return 0
+    
+    # Number of concurrent users supported
+    concurrent_users = int(available_kv_vram / kv_cache_per_user_gb)
+    return max(0, concurrent_users)
+
+
+def calc_kv_cache_per_user_gb(
+    context_length: int,
+    precision: str,
+    params_b: float,
+) -> float:
+    """Calculate KV cache memory per user based on context length and model size.
+    
+    Uses model architecture to estimate KV cache requirements.
+    """
+    arch = get_model_arch(params_b)
+    bytes_per_elem = PRECISION_BYTES.get(precision, 2.0)
+    
+    # KV cache per sequence: 2 * num_layers * hidden_dim * context_length * bytes_per_elem
+    kv_bytes_per_sequence = 2 * arch["num_layers"] * arch["hidden_dim"] * context_length * bytes_per_elem
+    kv_gb_per_sequence = kv_bytes_per_sequence / (1024**3)
+    
+    return kv_gb_per_sequence
+
+
 def calc_max_context_tokens(
     hbm_capacity_gb: float,
     model_memory_gb: float,
@@ -143,19 +190,41 @@ def calculate_performance(
     is_moe: bool = False,
     num_experts: int = 8,
     active_experts: int = 2,
+    # New fields for Phase 4
+    memory_gb: float = None,
+    memory_type: str = None,
+    interconnect_type: str = None,
+    supports_fp4: bool = None,
 ) -> PerformanceResult:
     """Full performance calculation for a given GPU config.
+
+    Phase 4 Updates:
+    - Use new memory_gb field if available, fallback to hbm_capacity_gb
+    - Adjust calculations for PCIe vs NVLink interconnects
+    - Implement proper concurrent user support calculations
 
     For MoE models: memory sizing uses full params (all experts stored in VRAM),
     but compute/bandwidth per token uses only the active fraction.
     """
+    # Use new memory field if available, otherwise fallback
+    effective_memory_gb = memory_gb if memory_gb is not None else hbm_capacity_gb
+    
+    # Adjust memory bandwidth for PCIe vs NVLink
+    effective_bandwidth_tb_s = mem_bandwidth_tb_s
+    if interconnect_type == "PCIe" and gpu_count > 1:
+        # PCIe scaling is much worse than NVLink for multi-GPU
+        # Apply PCIe bandwidth limitations for cross-GPU communication
+        effective_bandwidth_tb_s = mem_bandwidth_tb_s * 0.3  # PCIe has ~30% efficiency vs NVLink
+    
     arch = get_model_arch(params_b)
 
     # Memory: all experts must be stored in VRAM
     model_mem = calc_model_memory_gb(params_b, precision)
-    kv_cache = calc_kv_cache_gb(
-        arch["num_layers"], arch["hidden_dim"], context_length, batch_size, precision
-    )
+    
+    # KV cache calculation with proper concurrent user support
+    kv_per_user = calc_kv_cache_per_user_gb(context_length, precision, params_b)
+    kv_cache = kv_per_user * batch_size
+    
     total_mem = model_mem + kv_cache
 
     # Compute/bandwidth: MoE only activates a fraction of params per token
@@ -163,15 +232,25 @@ def calculate_performance(
     if is_moe and num_experts > 0:
         active_params_b = params_b * (active_experts / num_experts)
 
+    # Adjust TFLOPS for FP4 support
+    effective_tflops = bf16_tflops
+    if precision == "FP8":
+        effective_tflops = bf16_tflops * 2.0  # FP8 tensor cores ~2x BF16
+    elif precision == "FP4" and supports_fp4:
+        effective_tflops = bf16_tflops * 4.0  # FP4 tensor cores ~4x BF16
+    elif precision == "FP4" and not supports_fp4:
+        # GPU doesn't support FP4, fallback to FP8 performance
+        effective_tflops = bf16_tflops * 2.0
+
     prefill_tps, is_compute_bound = calc_prefill_tokens_per_sec(
-        bf16_tflops * gpu_count, active_params_b, precision, mem_bandwidth_tb_s * gpu_count
+        effective_tflops * gpu_count, active_params_b, precision, effective_bandwidth_tb_s * gpu_count
     )
     decode_tps = calc_decode_tokens_per_sec(
-        mem_bandwidth_tb_s * gpu_count, active_params_b, precision
+        effective_bandwidth_tb_s * gpu_count, active_params_b, precision
     )
 
     max_ctx = calc_max_context_tokens(
-        hbm_capacity_gb, model_mem, arch["num_layers"], arch["hidden_dim"], precision, gpu_count
+        effective_memory_gb, model_mem, arch["num_layers"], arch["hidden_dim"], precision, gpu_count
     )
 
     return PerformanceResult(

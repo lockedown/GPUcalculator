@@ -26,7 +26,7 @@ from app.schemas.workload import (
     RackPlanResult,
     ComparisonResponse,
 )
-from app.engine.performance import calculate_performance
+from app.engine.performance import calculate_performance, calc_concurrent_users_support
 from app.engine.cost import calc_tco, calc_network_cost
 from app.engine.complexity import calc_complexity
 from app.engine.availability import calc_availability
@@ -61,17 +61,22 @@ def calc_topology(
 ) -> TopologyResult:
     """Determine GPU count and parallelism strategy.
 
+    Phase 4 Updates:
+    - Handle PCIe vs NVLink scaling differences
+    - RTX PRO 6000 BSE: scale users linearly per card (PCIe pools, not unified NVLink)
+
     Includes DP (data-parallel) replicas for throughput scaling when the
     model fits on a single GPU but concurrent load demands more capacity.
 
     `total_memory_gb` should already include KV cache for ALL concurrent
     sequences (concurrent_users × batch_size × per-sequence KV).
     """
-    single_gpu_hbm = gpu.hbm_capacity_gb
+    # Use new memory_gb field if available, otherwise fallback to hbm_capacity_gb
+    single_gpu_memory = gpu.memory_gb if gpu.memory_gb is not None else gpu.hbm_capacity_gb
 
     # --- Rack-scale path (NVL72) ---
     if gpu.is_rack_scale and gpu.rack_gpu_count:
-        total_hbm = single_gpu_hbm * gpu.rack_gpu_count
+        total_hbm = single_gpu_memory * gpu.rack_gpu_count
         if total_memory_gb <= total_hbm:
             return TopologyResult(
                 gpu_count=gpu.rack_gpu_count,
@@ -87,10 +92,46 @@ def calc_topology(
                 cross_node_latency_penalty=0.0,
             )
 
-    # --- Standard multi-GPU sizing ---
+    # --- PCIe-based scaling (RTX PRO 6000 BSE) ---
+    if gpu.interconnect_type == "PCIe":
+        # For PCIe GPUs, each GPU operates independently
+        # Scale linearly per card for concurrent users
+        min_gpus_for_model = max(1, math.ceil(model_memory_gb / (single_gpu_memory * 0.85)))
+        min_gpus_for_workload = max(1, math.ceil(total_memory_gb / (single_gpu_memory * 0.85)))
+        
+        # For RTX PRO 6000 BSE, prioritize user concurrency over tensor parallelism
+        base_gpu_count = max(min_gpus_for_model, min_gpus_for_workload)
+        
+        # Add DP replicas for additional concurrent users
+        # Each additional GPU can handle roughly the same number of users independently
+        max_concurrent_per_gpu = calc_concurrent_users_support(
+            single_gpu_memory, model_memory_gb / 2,  # Approximate model size in GB
+            "FP8", 4096, 0.8  # Default assumptions
+        )
+        
+        if concurrent_users > max_concurrent_per_gpu:
+            dp_degree = math.ceil(concurrent_users / max_concurrent_per_gpu)
+            gpu_count = base_gpu_count * dp_degree
+        else:
+            gpu_count = base_gpu_count
+            dp_degree = 1
+
+        return TopologyResult(
+            gpu_count=gpu_count,
+            nodes=math.ceil(gpu_count / 8),  # Max 8 GPUs per server
+            gpus_per_node=min(gpu_count, 8),
+            parallelism_strategy="PCIe independent pools",
+            tp_degree=1,  # No tensor parallelism for PCIe
+            pp_degree=1,  # No pipeline parallelism for PCIe
+            dp_degree=dp_degree,
+            effective_bandwidth_gb_s=gpu.interconnect_bw_gb_s,
+            cross_node_latency_penalty=0.1,  # PCIe has higher latency than NVLink
+        )
+
+    # --- Standard multi-GPU sizing (NVLink-based) ---
     gpus_per_node = gpu.max_gpus_per_node or 8
-    min_gpus_for_model = max(1, math.ceil(model_memory_gb / (single_gpu_hbm * 0.85)))
-    min_gpus_for_workload = max(1, math.ceil(total_memory_gb / (single_gpu_hbm * 0.85)))
+    min_gpus_for_model = max(1, math.ceil(model_memory_gb / (single_gpu_memory * 0.85)))
+    min_gpus_for_workload = max(1, math.ceil(total_memory_gb / (single_gpu_memory * 0.85)))
     capacity_gpus = max(min_gpus_for_model, min_gpus_for_workload)
 
     # --- DP replicas for throughput scaling ---
@@ -195,6 +236,45 @@ def evaluate_gpu(
     """Evaluate a single GPU against the workload and constraints."""
     warnings: list[str] = []
 
+    # --- Hard Constraint Filtering (Phase 3) ---
+    
+    # 1. Workload Constraint: RTX PRO 6000 BSE for training/fine-tuning
+    if gpu.name == "RTX PRO 6000 BSE":
+        if workload.workload_type in ["training", "fine-tuning", "pre-training"]:
+            # Return early with a result that will be filtered out
+            return GPUResult(
+                gpu_id=gpu.id,
+                gpu_name=gpu.name,
+                gpu_vendor=gpu.vendor,
+                warnings=[f"{gpu.name} is not suitable for {workload.workload_type} workloads (inference only)"],
+                is_estimated=gpu.is_estimated,
+            )
+    
+    # 2. Infrastructure Constraint: Air cooling vs high-TDP GPUs
+    if constraints.cooling_type == "air":
+        # Filter out DLC-only and high-TDP GPUs for air-cooled environments
+        if gpu.cooling_requirement == "DLC":
+            return GPUResult(
+                gpu_id=gpu.id,
+                gpu_name=gpu.name,
+                gpu_vendor=gpu.vendor,
+                warnings=[f"{gpu.name} requires liquid cooling (DLC mandatory)"],
+                is_estimated=gpu.is_estimated,
+            )
+        # B200 air cooling is marginal, add warning but allow
+        if gpu.name in ["B200 HGX"] and gpu.tdp_watts and gpu.tdp_watts > 900:
+            warnings.append(f"{gpu.name} has marginal air cooling support at {gpu.tdp_watts}W TDP")
+    
+    # 3. 200B Model Constraint: RTX PRO 6000 BSE capacity check
+    if workload.model_params_b >= 200 and gpu.name == "RTX PRO 6000 BSE":
+        return GPUResult(
+            gpu_id=gpu.id,
+            gpu_name=gpu.name,
+            gpu_vendor=gpu.vendor,
+            warnings=[f"{gpu.name} cannot handle {workload.model_params_b}B parameter models (96GB insufficient for 200B+ models)"],
+            is_estimated=gpu.is_estimated,
+        )
+
     # --- Performance: first pass with concurrent KV cache for sizing ---
     total_sequences = workload.concurrent_users * workload.batch_size
     moe_kwargs = dict(
@@ -212,6 +292,11 @@ def evaluate_gpu(
         hbm_capacity_gb=gpu.hbm_capacity_gb,
         gpu_count=1,
         **moe_kwargs,
+        # New Phase 4 parameters
+        memory_gb=gpu.memory_gb,
+        memory_type=gpu.memory_type,
+        interconnect_type=gpu.interconnect_type,
+        supports_fp4=gpu.supports_fp4,
     )
 
     # --- Topology (uses concurrent-aware memory for sizing) ---
@@ -236,6 +321,11 @@ def evaluate_gpu(
         hbm_capacity_gb=gpu.hbm_capacity_gb,
         gpu_count=max(1, topo.gpu_count // topo.dp_degree),
         **moe_kwargs,
+        # New Phase 4 parameters
+        memory_gb=gpu.memory_gb,
+        memory_type=gpu.memory_type,
+        interconnect_type=gpu.interconnect_type,
+        supports_fp4=gpu.supports_fp4,
     )
 
     # Apply calibration — per-replica throughput
