@@ -1,5 +1,4 @@
 {
-  "ignoreCommand": "exit 1",
   "builds": [
     {
       "src": "api/index.py",
