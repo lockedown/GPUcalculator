@@ -21,12 +21,14 @@ from __future__ import annotations
 
 # Ground-truth decode tok/s for Llama3-70B FP16 (batch=1, single GPU / rack unit)
 REFERENCE_DECODE: dict[str, float] = {
-    "H200 SXM5": 55.0,
-    "B100 SXM": 90.0,
-    "B200 SXM": 115.0,
-    "B300 SXM": 170.0,
+    "H100 SXM5": 40.0,
+    "H200 SXM": 55.0,
+    "B100 HGX": 90.0,
+    "B200 HGX": 115.0,
+    "B300 HGX": 170.0,
     "GB200 NVL72": 200.0,
     "GB300 NVL72": 280.0,
+    "RTX PRO 6000 BSE": 32.0,
     "MI300X": 70.0,
     "MI350X": 100.0,
     "MI355X": 118.0,
@@ -34,12 +36,14 @@ REFERENCE_DECODE: dict[str, float] = {
 
 # Ground-truth prefill K tok/s for Llama3-70B FP16
 REFERENCE_PREFILL: dict[str, float] = {
-    "H200 SXM5": 20_000.0,
-    "B100 SXM": 32_000.0,
-    "B200 SXM": 45_000.0,
-    "B300 SXM": 70_000.0,
+    "H100 SXM5": 14_000.0,
+    "H200 SXM": 20_000.0,
+    "B100 HGX": 32_000.0,
+    "B200 HGX": 45_000.0,
+    "B300 HGX": 70_000.0,
     "GB200 NVL72": 82_000.0,
     "GB300 NVL72": 130_000.0,
+    "RTX PRO 6000 BSE": 8_000.0,
     "MI300X": 22_000.0,
     "MI350X": 38_000.0,
     "MI355X": 46_000.0,
@@ -47,12 +51,14 @@ REFERENCE_PREFILL: dict[str, float] = {
 
 # FP8 multiplier over FP16 (from HTML "FP8 Quantised Throughput" row)
 FP8_MULTIPLIER: dict[str, float] = {
-    "H200 SXM5": 1.0,       # No FP8 on H200
-    "B100 SXM": 1.8,
-    "B200 SXM": 1.9,
-    "B300 SXM": 2.1,
+    "H100 SXM5": 1.8,       # FP8 Transformer Engine on Hopper
+    "H200 SXM": 1.8,        # Same Hopper compute die as H100
+    "B100 HGX": 1.8,
+    "B200 HGX": 1.9,
+    "B300 HGX": 2.1,
     "GB200 NVL72": 2.2,
     "GB300 NVL72": 2.4,
+    "RTX PRO 6000 BSE": 2.0, # 5th-gen Tensor Cores, FP8/FP4
     "MI300X": 1.0,           # Partial / marginal
     "MI350X": 1.7,
     "MI355X": 1.8,
@@ -80,17 +86,22 @@ _prefill_factors: dict[str, float] | None = None
 
 
 def _gpu_specs() -> dict[str, dict]:
-    """Minimal GPU specs for roofline calculation (avoids DB dependency)."""
+    """Minimal GPU specs for roofline calculation (avoids DB dependency).
+
+    Values must match seed.py / HTML source data.
+    """
     return {
-        "H200 SXM5":   {"mem_bw": 4.8, "bf16": 989},
-        "B100 SXM":    {"mem_bw": 8.0, "bf16": 1800},
-        "B200 SXM":    {"mem_bw": 8.0, "bf16": 2250},
-        "B300 SXM":    {"mem_bw": 16.0, "bf16": 2800},
-        "GB200 NVL72": {"mem_bw": 8.0, "bf16": 2500},
-        "GB300 NVL72": {"mem_bw": 16.0, "bf16": 4000},
-        "MI300X":      {"mem_bw": 5.3, "bf16": 1300},
-        "MI350X":      {"mem_bw": 8.0, "bf16": 1800},
-        "MI355X":      {"mem_bw": 8.0, "bf16": 2000},
+        "H100 SXM5":          {"mem_bw": 3.35, "bf16": 1750},
+        "H200 SXM":           {"mem_bw": 4.8,  "bf16": 1970},
+        "B100 HGX":           {"mem_bw": 8.0,  "bf16": 1750},
+        "B200 HGX":           {"mem_bw": 8.0,  "bf16": 2250},
+        "B300 HGX":           {"mem_bw": 8.0,  "bf16": 2250},
+        "GB200 NVL72":        {"mem_bw": 8.0,  "bf16": 2250},
+        "GB300 NVL72":        {"mem_bw": 8.0,  "bf16": 2250},
+        "RTX PRO 6000 BSE":   {"mem_bw": 1.6,  "bf16": 480},
+        "MI300X":             {"mem_bw": 3.2,  "bf16": 1300},
+        "MI350X":             {"mem_bw": 6.0,  "bf16": 1800},
+        "MI355X":             {"mem_bw": 6.4,  "bf16": 2000},
     }
 
 

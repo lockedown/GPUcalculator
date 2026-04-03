@@ -12,12 +12,12 @@ PRECISION_BYTES = {
 
 # Approximate model architecture params for common LLMs
 MODEL_ARCHITECTURES = {
-    7: {"num_layers": 32, "hidden_dim": 4096, "num_heads": 32, "head_dim": 128},
-    13: {"num_layers": 40, "hidden_dim": 5120, "num_heads": 40, "head_dim": 128},
-    34: {"num_layers": 48, "hidden_dim": 8192, "num_heads": 64, "head_dim": 128},
-    70: {"num_layers": 80, "hidden_dim": 8192, "num_heads": 64, "head_dim": 128},
-    405: {"num_layers": 126, "hidden_dim": 16384, "num_heads": 128, "head_dim": 128},
-    1500: {"num_layers": 160, "hidden_dim": 24576, "num_heads": 192, "head_dim": 128},
+    7: {"num_layers": 32, "hidden_dim": 4096, "num_heads": 32, "num_kv_heads": 8, "head_dim": 128},
+    13: {"num_layers": 40, "hidden_dim": 5120, "num_heads": 40, "num_kv_heads": 8, "head_dim": 128},
+    34: {"num_layers": 48, "hidden_dim": 8192, "num_heads": 64, "num_kv_heads": 8, "head_dim": 128},
+    70: {"num_layers": 80, "hidden_dim": 8192, "num_heads": 64, "num_kv_heads": 8, "head_dim": 128},
+    405: {"num_layers": 126, "hidden_dim": 16384, "num_heads": 128, "num_kv_heads": 16, "head_dim": 128},
+    1500: {"num_layers": 160, "hidden_dim": 24576, "num_heads": 192, "num_kv_heads": 24, "head_dim": 128},
 }
 
 
@@ -57,10 +57,20 @@ def calc_kv_cache_gb(
     context_length: int,
     batch_size: int,
     precision: str,
+    num_kv_heads: int | None = None,
+    head_dim: int = 128,
 ) -> float:
-    """KV cache memory: 2 * num_layers * hidden_dim * context_len * precision_bytes * batch_size."""
+    """KV cache memory: 2 * num_layers * kv_dim * context_len * precision_bytes * batch_size.
+
+    Uses GQA-aware kv_dim (num_kv_heads * head_dim) when available,
+    falling back to hidden_dim for MHA models.
+
+    .. deprecated:: Prefer ``calc_kv_cache_per_user_gb`` for per-user sizing
+       inside ``calculate_performance``.  Kept for backward compatibility.
+    """
     bytes_per_elem = PRECISION_BYTES.get(precision, 2.0)
-    kv_bytes = 2 * num_layers * hidden_dim * context_length * bytes_per_elem * batch_size
+    kv_dim = (num_kv_heads * head_dim) if num_kv_heads else hidden_dim
+    kv_bytes = 2 * num_layers * kv_dim * context_length * bytes_per_elem * batch_size
     return kv_bytes / (1024**3)
 
 
@@ -116,25 +126,33 @@ def calc_concurrent_users_support(
     model_params_b: float,
     precision: str,
     context_length: int,
-    kv_cache_per_user_gb: float = 0.8,  # Default 0.6-1GB per user for 4K context
+    kv_cache_per_user_gb: float | None = None,
 ) -> int:
     """Calculate how many concurrent users can be supported based on VRAM.
-    
-    Phase 4: Concurrency & VRAM Math Implementation
-    - Determine Weight Footprint: Calculate based on precision
+
+    - Determine Weight Footprint from precision
     - Calculate Headroom: Available_KV_VRAM = GPU_Memory_GB - Weight_Footprint_GB
-    - Calculate Users: Divide Available_KV_VRAM by KV cache per user
+    - Calculate Users: Divide Available_KV_VRAM by per-user KV cache
+
+    When kv_cache_per_user_gb is None, it is computed dynamically from
+    context_length, precision, and model architecture (GQA-aware).
     """
     # Weight footprint calculation
     weight_footprint_gb = calc_model_memory_gb(model_params_b, precision)
-    
+
     # Available VRAM for KV cache
     available_kv_vram = memory_gb - weight_footprint_gb
-    
+
     if available_kv_vram <= 0:
         return 0
-    
-    # Number of concurrent users supported
+
+    # Compute per-user KV cache dynamically if not provided
+    if kv_cache_per_user_gb is None:
+        kv_cache_per_user_gb = calc_kv_cache_per_user_gb(context_length, precision, model_params_b)
+
+    if kv_cache_per_user_gb <= 0:
+        return 0
+
     concurrent_users = int(available_kv_vram / kv_cache_per_user_gb)
     return max(0, concurrent_users)
 
@@ -145,16 +163,19 @@ def calc_kv_cache_per_user_gb(
     params_b: float,
 ) -> float:
     """Calculate KV cache memory per user based on context length and model size.
-    
-    Uses model architecture to estimate KV cache requirements.
+
+    Uses GQA-aware KV dimension (num_kv_heads * head_dim) for accurate sizing.
+    For 70B Llama 3 FP8 @ 4K context this yields ~0.6 GB/user, matching
+    industry benchmarks.
     """
     arch = get_model_arch(params_b)
     bytes_per_elem = PRECISION_BYTES.get(precision, 2.0)
-    
-    # KV cache per sequence: 2 * num_layers * hidden_dim * context_length * bytes_per_elem
-    kv_bytes_per_sequence = 2 * arch["num_layers"] * arch["hidden_dim"] * context_length * bytes_per_elem
+    kv_dim = arch.get("num_kv_heads", arch["num_heads"]) * arch["head_dim"]
+
+    # KV cache per sequence: 2 * num_layers * kv_dim * context_length * bytes_per_elem
+    kv_bytes_per_sequence = 2 * arch["num_layers"] * kv_dim * context_length * bytes_per_elem
     kv_gb_per_sequence = kv_bytes_per_sequence / (1024**3)
-    
+
     return kv_gb_per_sequence
 
 
@@ -165,15 +186,21 @@ def calc_max_context_tokens(
     hidden_dim: int,
     precision: str,
     gpu_count: int = 1,
+    num_kv_heads: int | None = None,
+    head_dim: int = 128,
 ) -> int:
-    """Max context length that fits in VRAM after model weights."""
+    """Max context length that fits in VRAM after model weights.
+
+    Uses GQA-aware kv_dim when num_kv_heads is provided.
+    """
     total_hbm = hbm_capacity_gb * gpu_count
     remaining_gb = total_hbm - model_memory_gb
     if remaining_gb <= 0:
         return 0
     bytes_per_elem = PRECISION_BYTES.get(precision, 2.0)
-    # KV cache per token = 2 * num_layers * hidden_dim * bytes_per_elem
-    bytes_per_token = 2 * num_layers * hidden_dim * bytes_per_elem
+    kv_dim = (num_kv_heads * head_dim) if num_kv_heads else hidden_dim
+    # KV cache per token = 2 * num_layers * kv_dim * bytes_per_elem
+    bytes_per_token = 2 * num_layers * kv_dim * bytes_per_elem
     max_tokens = int((remaining_gb * 1024**3) / bytes_per_token)
     return max(0, max_tokens)
 
@@ -209,22 +236,26 @@ def calculate_performance(
     # Use new memory field if available, otherwise fallback
     effective_memory_gb = memory_gb if memory_gb is not None else hbm_capacity_gb
     
-    # Adjust memory bandwidth for PCIe vs NVLink
+    # PCIe GPUs (e.g. RTX PRO 6000 BSE) operate as independent instances
+    # (tp_degree=1, dp scaling only) so local memory bandwidth is unaffected.
     effective_bandwidth_tb_s = mem_bandwidth_tb_s
-    if interconnect_type == "PCIe" and gpu_count > 1:
-        # PCIe scaling is much worse than NVLink for multi-GPU
-        # Apply PCIe bandwidth limitations for cross-GPU communication
-        effective_bandwidth_tb_s = mem_bandwidth_tb_s * 0.3  # PCIe has ~30% efficiency vs NVLink
-    
+
     arch = get_model_arch(params_b)
 
     # Memory: all experts must be stored in VRAM
     model_mem = calc_model_memory_gb(params_b, precision)
-    
-    # KV cache calculation with proper concurrent user support
-    kv_per_user = calc_kv_cache_per_user_gb(context_length, precision, params_b)
+
+    # For MoE models, KV cache depends on the base/backbone architecture,
+    # not total expert-inflated params.  E.g. Mixtral 8×22B has 176B total
+    # params but KV cache matches a ~22B dense model.
+    kv_params_b = params_b
+    if is_moe and num_experts > 0:
+        kv_params_b = params_b / num_experts  # approximate backbone size
+
+    # KV cache calculation with proper concurrent user support (GQA-aware)
+    kv_per_user = calc_kv_cache_per_user_gb(context_length, precision, kv_params_b)
     kv_cache = kv_per_user * batch_size
-    
+
     total_mem = model_mem + kv_cache
 
     # Compute/bandwidth: MoE only activates a fraction of params per token
@@ -232,25 +263,22 @@ def calculate_performance(
     if is_moe and num_experts > 0:
         active_params_b = params_b * (active_experts / num_experts)
 
-    # Adjust TFLOPS for FP4 support
-    effective_tflops = bf16_tflops
-    if precision == "FP8":
-        effective_tflops = bf16_tflops * 2.0  # FP8 tensor cores ~2x BF16
-    elif precision == "FP4" and supports_fp4:
-        effective_tflops = bf16_tflops * 4.0  # FP4 tensor cores ~4x BF16
-    elif precision == "FP4" and not supports_fp4:
-        # GPU doesn't support FP4, fallback to FP8 performance
-        effective_tflops = bf16_tflops * 2.0
+    # Determine effective precision — if GPU doesn't support FP4, fall back to FP8
+    effective_precision = precision
+    if precision == "FP4" and not supports_fp4:
+        effective_precision = "FP8"
 
+    # TFLOPS scaling for precision is handled inside calc_prefill_tokens_per_sec
     prefill_tps, is_compute_bound = calc_prefill_tokens_per_sec(
-        effective_tflops * gpu_count, active_params_b, precision, effective_bandwidth_tb_s * gpu_count
+        bf16_tflops * gpu_count, active_params_b, effective_precision, effective_bandwidth_tb_s * gpu_count
     )
     decode_tps = calc_decode_tokens_per_sec(
-        effective_bandwidth_tb_s * gpu_count, active_params_b, precision
+        effective_bandwidth_tb_s * gpu_count, active_params_b, effective_precision
     )
 
     max_ctx = calc_max_context_tokens(
-        effective_memory_gb, model_mem, arch["num_layers"], arch["hidden_dim"], precision, gpu_count
+        effective_memory_gb, model_mem, arch["num_layers"], arch["hidden_dim"], precision, gpu_count,
+        num_kv_heads=arch.get("num_kv_heads"), head_dim=arch["head_dim"],
     )
 
     return PerformanceResult(

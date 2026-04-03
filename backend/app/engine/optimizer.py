@@ -26,7 +26,7 @@ from app.schemas.workload import (
     RackPlanResult,
     ComparisonResponse,
 )
-from app.engine.performance import calculate_performance, calc_concurrent_users_support
+from app.engine.performance import calculate_performance, calc_concurrent_users_support, calc_kv_cache_per_user_gb
 from app.engine.cost import calc_tco, calc_network_cost
 from app.engine.complexity import calc_complexity
 from app.engine.availability import calc_availability
@@ -58,18 +58,18 @@ def calc_topology(
     total_memory_gb: float,
     concurrent_users: int = 1,
     batch_size: int = 1,
+    kv_per_user_gb: float = 0.6,
 ) -> TopologyResult:
     """Determine GPU count and parallelism strategy.
-
-    Phase 4 Updates:
-    - Handle PCIe vs NVLink scaling differences
-    - RTX PRO 6000 BSE: scale users linearly per card (PCIe pools, not unified NVLink)
 
     Includes DP (data-parallel) replicas for throughput scaling when the
     model fits on a single GPU but concurrent load demands more capacity.
 
     `total_memory_gb` should already include KV cache for ALL concurrent
     sequences (concurrent_users × batch_size × per-sequence KV).
+
+    `kv_per_user_gb` is the pre-computed GQA-aware KV cache per user,
+    used by the PCIe path to determine per-card user capacity.
     """
     # Use new memory_gb field if available, otherwise fallback to hbm_capacity_gb
     single_gpu_memory = gpu.memory_gb if gpu.memory_gb is not None else gpu.hbm_capacity_gb
@@ -94,38 +94,31 @@ def calc_topology(
 
     # --- PCIe-based scaling (RTX PRO 6000 BSE) ---
     if gpu.interconnect_type == "PCIe":
-        # For PCIe GPUs, each GPU operates independently
-        # Scale linearly per card for concurrent users
+        # PCIe GPUs operate as independent instances (no tensor parallelism).
+        # Each card must fit the full model weights; concurrency scales via DP.
         min_gpus_for_model = max(1, math.ceil(model_memory_gb / (single_gpu_memory * 0.85)))
-        min_gpus_for_workload = max(1, math.ceil(total_memory_gb / (single_gpu_memory * 0.85)))
-        
-        # For RTX PRO 6000 BSE, prioritize user concurrency over tensor parallelism
-        base_gpu_count = max(min_gpus_for_model, min_gpus_for_workload)
-        
-        # Add DP replicas for additional concurrent users
-        # Each additional GPU can handle roughly the same number of users independently
-        max_concurrent_per_gpu = calc_concurrent_users_support(
-            single_gpu_memory, model_memory_gb / 2,  # Approximate model size in GB
-            "FP8", 4096, 0.8  # Default assumptions
-        )
-        
-        if concurrent_users > max_concurrent_per_gpu:
-            dp_degree = math.ceil(concurrent_users / max_concurrent_per_gpu)
-            gpu_count = base_gpu_count * dp_degree
+
+        # How many users fit on one card after weights?
+        available_kv_gb = single_gpu_memory * 0.85 - model_memory_gb
+        if available_kv_gb > 0 and kv_per_user_gb > 0:
+            users_per_card = max(1, int(available_kv_gb / kv_per_user_gb))
         else:
-            gpu_count = base_gpu_count
-            dp_degree = 1
+            users_per_card = 1
+
+        total_users = concurrent_users * batch_size
+        dp_degree = max(1, math.ceil(total_users / users_per_card))
+        gpu_count = max(min_gpus_for_model, dp_degree)
 
         return TopologyResult(
             gpu_count=gpu_count,
-            nodes=math.ceil(gpu_count / 8),  # Max 8 GPUs per server
+            nodes=math.ceil(gpu_count / 8),
             gpus_per_node=min(gpu_count, 8),
             parallelism_strategy="PCIe independent pools",
-            tp_degree=1,  # No tensor parallelism for PCIe
-            pp_degree=1,  # No pipeline parallelism for PCIe
+            tp_degree=1,
+            pp_degree=1,
             dp_degree=dp_degree,
             effective_bandwidth_gb_s=gpu.interconnect_bw_gb_s,
-            cross_node_latency_penalty=0.1,  # PCIe has higher latency than NVLink
+            cross_node_latency_penalty=0.0,  # Independent instances, no cross-GPU comm
         )
 
     # --- Standard multi-GPU sizing (NVLink-based) ---
@@ -300,12 +293,17 @@ def evaluate_gpu(
     )
 
     # --- Topology (uses concurrent-aware memory for sizing) ---
+    # Compute per-user KV for topology's PCIe DP scaling
+    kv_per_user = calc_kv_cache_per_user_gb(
+        workload.context_length, workload.precision, workload.model_params_b
+    )
     topo = calc_topology(
         gpu,
         perf_sizing.model_memory_gb,
         perf_sizing.total_memory_required_gb,
         concurrent_users=workload.concurrent_users,
         batch_size=workload.batch_size,
+        kv_per_user_gb=kv_per_user,
     )
 
     # --- Performance: recalculate per-replica metrics with actual GPU count ---

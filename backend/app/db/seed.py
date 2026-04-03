@@ -47,7 +47,7 @@ GPU_EXTRA_DATA = {
         "interconnect_bw_gb_s": 900,
         "max_gpus_per_node": 8,
         "is_rack_scale": False,
-        "fp8_tflops": None,  # H200 has no FP8 Transformer Engine
+        "fp8_tflops": 3960,  # Same Hopper compute die as H100
         "release_date": "2024-Q1",
     },
     "B100 HGX": {
@@ -170,8 +170,9 @@ GPU_EXTRA_DATA = {
         "interconnect_bw_gb_s": 32,  # PCIe Gen 5 x16 ~32 GB/s
         "max_gpus_per_node": 8,
         "is_rack_scale": False,
-        "fp8_tflops": None,  # Not typically rated for FP8
-        "fp4_tflops": 6600,
+        "bf16_tflops": 480,  # Estimated from Blackwell die + GDDR7 config
+        "fp8_tflops": 960,  # ~2x BF16 via 5th-gen Tensor Cores
+        "fp4_tflops": 6600,  # Akamai benchmark-derived
         "release_date": "2025-Q1",
     },
     "MI300X": {
