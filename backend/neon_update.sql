@@ -115,7 +115,7 @@ JOIN gpus ON gpus.name = t.name;
 
 -- Insert price history data (all GPUs, latest market price)
 INSERT INTO price_history (gpu_id, date, price_usd, source)
-SELECT id, date, price_usd, source FROM (VALUES
+SELECT id, t.date::date, price_usd, source FROM (VALUES
 ('H100 SXM5', '2025-04-01', 22000, 'market'),
 ('H200 SXM', '2025-04-01', 25000, 'market'),
 ('B100 HGX', '2025-04-01', 34000, 'market'),
@@ -335,7 +335,7 @@ JOIN gpus g ON g.name = t.gpu_name;
 -- Additional price history data (Q1–Q3 2025 trend)
 -- =====================================================
 INSERT INTO price_history (gpu_id, date, price_usd, source)
-SELECT id, date, price_usd, source FROM (VALUES
+SELECT id, t.date::date, price_usd, source FROM (VALUES
 ('H100 SXM5', '2025-01-01', 25000, 'market'),
 ('H100 SXM5', '2025-02-01', 23500, 'market'),
 ('H100 SXM5', '2025-03-01', 22500, 'market'),
