@@ -30,7 +30,7 @@ class TestPricesEndpoint:
     def test_list_has_all_seeded_gpus(self):
         r = client.get("/api/prices")
         names = [g["gpu_name"] for g in r.json()]
-        assert "H200 SXM5" in names
+        assert "H200 SXM" in names
         assert "MI300X" in names
 
     def test_get_single_gpu_prices(self):
@@ -58,7 +58,7 @@ class TestPricesEndpoint:
     def test_h200_price_trend_declining(self):
         """H200 should show a declining price trend over time."""
         r = client.get("/api/prices")
-        h200 = next(g for g in r.json() if g["gpu_name"] == "H200 SXM5")
+        h200 = next(g for g in r.json() if g["gpu_name"] == "H200 SXM")
         prices = [p["price_usd"] for p in h200["prices"]]
         assert len(prices) >= 3
         assert prices[-1] < prices[0], "H200 price should decline over time"
@@ -95,7 +95,7 @@ class TestExportEndpoint:
         r = client.post("/api/export/csv", json=self.WORKLOAD)
         lines = r.text.strip().split("\n")
         # Header + 9 GPUs
-        assert len(lines) == 10
+        assert len(lines) == 10  # Header + 9 GPUs
 
     def test_export_csv_includes_rack_data(self):
         r = client.post("/api/export/csv", json=self.WORKLOAD)
@@ -116,7 +116,10 @@ class TestExportEndpoint:
     def test_export_json_results_have_rack_plan(self):
         r = client.post("/api/export/json", json=self.WORKLOAD)
         results = r.json()["results"]
-        for result in results:
+        # GPUs filtered by constraints (e.g. DLC-only) may have rack_plan=None
+        evaluated = [res for res in results if res.get("tokens_per_sec") is not None]
+        assert len(evaluated) > 0
+        for result in evaluated:
             assert "rack_plan" in result
             rack = result["rack_plan"]
             assert rack is not None

@@ -43,8 +43,8 @@ class TestParseHTMLFile:
 
     def test_gpu_names(self, parsed):
         names = [s.name for s in parsed["gpu_specs"]]
-        assert "H200 SXM5" in names
-        assert "B200 SXM" in names
+        assert "H200 SXM" in names
+        assert "B200 HGX" in names
         assert "MI300X" in names
         assert "GB200 NVL72" in names
 
@@ -54,7 +54,7 @@ class TestParseHTMLFile:
         assert "AMD" in vendors
 
     def test_h200_specs(self, parsed):
-        h200 = next(s for s in parsed["gpu_specs"] if s.name == "H200 SXM5")
+        h200 = next(s for s in parsed["gpu_specs"] if s.name == "H200 SXM")
         assert h200.hbm_capacity_gb == pytest.approx(141.0, rel=0.05)
         assert h200.mem_bandwidth_tb_s == pytest.approx(4.8, rel=0.05)
         assert h200.vendor == "NVIDIA"
@@ -67,7 +67,7 @@ class TestParseHTMLFile:
 
     def test_estimated_gpus_flagged(self, parsed):
         est_names = [s.name for s in parsed["gpu_specs"] if s.is_estimated]
-        assert "B300 SXM" in est_names or len(est_names) >= 2
+        assert "B300 HGX" in est_names or len(est_names) >= 2
 
     def test_benchmarks_extracted(self, parsed):
         assert len(parsed["benchmarks"]) >= 18  # At least 18 benchmark rows
@@ -85,4 +85,4 @@ class TestParseHTMLFile:
 
     def test_column_order(self, parsed):
         assert len(parsed["gpu_column_order"]) == 9
-        assert parsed["gpu_column_order"][0] == "H200 SXM5"
+        assert parsed["gpu_column_order"][0] == "H200 SXM"

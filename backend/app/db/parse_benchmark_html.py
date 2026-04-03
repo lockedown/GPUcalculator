@@ -49,12 +49,20 @@ class GPUVerdict:
     strengths: list[str] = field(default_factory=list)
 
 
-# GPU column order in the HTML table
+# Map HTML-parsed GPU names to canonical names used in seed.py / calibration / DB
+HTML_TO_CANONICAL: dict[str, str] = {
+    "H200 SXM5": "H200 SXM",
+    "B100 SXM": "B100 HGX",
+    "B200 SXM": "B200 HGX",
+    "B300 SXM": "B300 HGX",
+}
+
+# GPU column order in the HTML table (canonical names)
 GPU_COLUMN_ORDER = [
-    "H200 SXM5",
-    "B100 SXM",
-    "B200 SXM",
-    "B300 SXM",
+    "H200 SXM",
+    "B100 HGX",
+    "B200 HGX",
+    "B300 HGX",
     "GB200 NVL72",
     "GB300 NVL72",
     "MI300X",
@@ -149,12 +157,13 @@ def parse_gpu_legend(soup: BeautifulSoup) -> list[GPUSpec]:
         if not name_el:
             continue
 
-        name = name_el.get_text(strip=True)
+        raw_name = name_el.get_text(strip=True)
+        name = HTML_TO_CANONICAL.get(raw_name, raw_name)
         sub_text = sub_el.get_text(strip=True) if sub_el else ""
         is_estimated = est_el is not None
 
         vendor = "AMD" if name.startswith("MI") else "NVIDIA"
-        form_factor = "NVL72" if "NVL72" in name else "SXM"
+        form_factor = "NVL72" if "NVL72" in name else ("HGX" if "HGX" in name else "SXM")
 
         spec = GPUSpec(
             name=name,
@@ -322,8 +331,9 @@ def parse_verdicts(soup: BeautifulSoup) -> list[GPUVerdict]:
         if not label_el:
             continue
 
+        raw_vname = label_el.get_text(strip=True)
         v = GPUVerdict(
-            gpu_name=label_el.get_text(strip=True),
+            gpu_name=HTML_TO_CANONICAL.get(raw_vname, raw_vname),
             spec_text=spec_el.get_text(strip=True) if spec_el else "",
             verdict_text=verdict_el.get_text(strip=True) if verdict_el else "",
             strengths=[li.get_text(strip=True) for li in strength_els],

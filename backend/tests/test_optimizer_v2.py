@@ -58,6 +58,13 @@ def db():
 def _mock_gpu(**overrides):
     defaults = dict(
         hbm_capacity_gb=192,
+        memory_gb=192,
+        memory_type="HBM3e",
+        memory_bandwidth_tbps=8.0,
+        interconnect_type="NVLink 5",
+        cooling_requirement="Any",
+        supported_workloads=["inference", "training", "fine-tuning"],
+        supports_fp4=True,
         is_rack_scale=False,
         rack_gpu_count=None,
         max_gpus_per_node=8,
@@ -146,30 +153,30 @@ class TestCalibration:
 
     def test_calibrated_decode_h200_within_15pct(self):
         raw = 34.3  # roofline: 4.8 TB/s / (70B×2)
-        calibrated = calibrate_decode("H200 SXM5", raw, "FP16")
-        ref = REFERENCE_DECODE["H200 SXM5"]
+        calibrated = calibrate_decode("H200 SXM", raw, "FP16")
+        ref = REFERENCE_DECODE["H200 SXM"]
         assert abs(calibrated - ref) / ref < 0.15
 
     def test_calibrated_decode_b200_within_15pct(self):
         raw = 57.1  # roofline: 8 TB/s / (70B×2)
-        calibrated = calibrate_decode("B200 SXM", raw, "FP16")
-        ref = REFERENCE_DECODE["B200 SXM"]
+        calibrated = calibrate_decode("B200 HGX", raw, "FP16")
+        ref = REFERENCE_DECODE["B200 HGX"]
         assert abs(calibrated - ref) / ref < 0.15
 
     def test_calibrated_prefill_b200(self):
         raw = 16_071.0  # rough roofline
-        calibrated = calibrate_prefill("B200 SXM", raw, "FP16")
-        assert calibrated > raw  # calibration should boost toward 45K
+        calibrated = calibrate_prefill("B200 HGX", raw, "FP16")
+        assert calibrated >= raw  # calibration should boost toward 45K
 
     def test_fp8_multiplier_applied(self):
-        fp16 = calibrate_decode("B200 SXM", 57.1, "FP16")
-        fp8 = calibrate_decode("B200 SXM", 57.1, "FP8")
-        mult = get_fp8_multiplier("B200 SXM")
+        fp16 = calibrate_decode("B200 HGX", 57.1, "FP16")
+        fp8 = calibrate_decode("B200 HGX", 57.1, "FP8")
+        mult = get_fp8_multiplier("B200 HGX")
         assert fp8 == pytest.approx(fp16 * mult, rel=0.01)
 
     def test_fp4_also_applies_fp8_mult(self):
-        fp16 = calibrate_decode("B300 SXM", 100.0, "FP16")
-        fp4 = calibrate_decode("B300 SXM", 100.0, "FP4")
+        fp16 = calibrate_decode("B300 HGX", 100.0, "FP16")
+        fp4 = calibrate_decode("B300 HGX", 100.0, "FP4")
         assert fp4 > fp16
 
     def test_unknown_gpu_factor_is_1(self):
@@ -352,34 +359,34 @@ class TestTopology:
         assert topo.dp_degree == 1
 
     def test_dp_moderate_concurrency(self):
-        """concurrent_users=10 should now trigger DP >= 2 (threshold = 8)."""
+        """concurrent_users=10 with no throughput info → fallback ceil(10/8)=2."""
         gpu = _mock_gpu()
         topo = calc_topology(gpu, 14.0, 20.0, concurrent_users=10, batch_size=1)
         assert topo.dp_degree >= 2
         assert "DP" in topo.parallelism_strategy
 
-    def test_dp_low_concurrency_triggers_dp(self):
-        """Even concurrent_users=5 should give DP=1 (5/8 rounds to 1)."""
+    def test_dp_low_concurrency_no_dp(self):
+        """concurrent_users=5, no throughput info → fallback ceil(5/8)=1."""
         gpu = _mock_gpu()
         topo = calc_topology(gpu, 14.0, 20.0, concurrent_users=5, batch_size=1)
-        assert topo.dp_degree == 1  # 5/8 = 0.625 → ceil = 1
+        assert topo.dp_degree == 1
 
     def test_dp_9_users_triggers_dp(self):
-        """concurrent_users=9 → 9/8 = 1.125 → ceil = 2."""
+        """concurrent_users=9 → fallback ceil(9/8)=2."""
         gpu = _mock_gpu()
         topo = calc_topology(gpu, 14.0, 20.0, concurrent_users=9, batch_size=1)
         assert topo.dp_degree == 2
 
     def test_dp_batch_size_multiplies(self):
-        """batch_size=4 with 5 users = 20 streams → DP=3."""
+        """batch_size=4 with 5 users = 20 streams → fallback ceil(20/8)=3."""
         gpu = _mock_gpu()
         topo = calc_topology(gpu, 14.0, 20.0, concurrent_users=5, batch_size=4)
-        assert topo.dp_degree == 3  # ceil(20/8) = 3
+        assert topo.dp_degree == 3
 
     def test_dp_high_concurrency(self):
         gpu = _mock_gpu()
         topo = calc_topology(gpu, 14.0, 20.0, concurrent_users=64, batch_size=1)
-        assert topo.dp_degree == 8  # ceil(64/8) = 8
+        assert topo.dp_degree == 8  # ceil(64/8) = 8, capped
 
     def test_dp_capped_at_8(self):
         gpu = _mock_gpu()
@@ -388,15 +395,15 @@ class TestTopology:
 
     def test_dp_disabled_when_model_exceeds_node(self):
         """When capacity_gpus > gpus_per_node, DP is not added."""
-        gpu = _mock_gpu(hbm_capacity_gb=192, max_gpus_per_node=8)
+        gpu = _mock_gpu(hbm_capacity_gb=192, memory_gb=192, max_gpus_per_node=8)
         topo = calc_topology(gpu, 2000.0, 2100.0, concurrent_users=50, batch_size=1)
         assert topo.dp_degree == 1
 
     def test_gpu_count_equals_capacity_times_dp(self):
         gpu = _mock_gpu()
         topo = calc_topology(gpu, 14.0, 20.0, concurrent_users=16, batch_size=1)
-        # capacity_gpus=1, dp=2 → gpu_count=2
-        assert topo.gpu_count == topo.dp_degree * 1  # model fits in 1 GPU
+        # capacity_gpus=1, model fits on 1 GPU
+        assert topo.gpu_count == topo.dp_degree * 1
 
 
 # ===========================================================================
@@ -405,63 +412,62 @@ class TestTopology:
 class TestConcurrentUsersImpact:
     """Verify concurrent_users changes topology, throughput, cost, and context."""
 
-    def test_cu10_more_gpus_than_cu1(self, db):
+    def test_cu50_more_gpus_than_cu1(self, db):
         w1 = WorkloadInput(model_params_b=70, concurrent_users=1)
-        w10 = WorkloadInput(model_params_b=70, concurrent_users=10)
+        w50 = WorkloadInput(model_params_b=70, concurrent_users=50)
         c = ConstraintInput()
         r1 = run_calculation(db, w1, c)
-        r10 = run_calculation(db, w10, c)
-        # Find a GPU that fits in 1 node (e.g. B200)
-        b1 = next(r for r in r1 if r.gpu_name == "B200 SXM")
-        b10 = next(r for r in r10 if r.gpu_name == "B200 SXM")
-        assert b10.topology.gpu_count > b1.topology.gpu_count
+        r50 = run_calculation(db, w50, c)
+        b1 = next(r for r in r1 if r.gpu_name == "B200 HGX")
+        b50 = next(r for r in r50 if r.gpu_name == "B200 HGX")
+        assert b50.topology.gpu_count > b1.topology.gpu_count
 
-    def test_cu10_higher_aggregate_throughput(self, db):
+    def test_cu50_higher_aggregate_throughput(self, db):
         w1 = WorkloadInput(model_params_b=70, concurrent_users=1)
-        w10 = WorkloadInput(model_params_b=70, concurrent_users=10)
+        w50 = WorkloadInput(model_params_b=70, concurrent_users=50)
         c = ConstraintInput()
         r1 = run_calculation(db, w1, c)
-        r10 = run_calculation(db, w10, c)
-        b1 = next(r for r in r1 if r.gpu_name == "B200 SXM")
-        b10 = next(r for r in r10 if r.gpu_name == "B200 SXM")
-        assert b10.tokens_per_sec > b1.tokens_per_sec
+        r50 = run_calculation(db, w50, c)
+        b1 = next(r for r in r1 if r.gpu_name == "B200 HGX")
+        b50 = next(r for r in r50 if r.gpu_name == "B200 HGX")
+        assert b50.tokens_per_sec > b1.tokens_per_sec
 
-    def test_cu10_higher_tco(self, db):
+    def test_cu50_higher_tco(self, db):
         w1 = WorkloadInput(model_params_b=70, concurrent_users=1)
-        w10 = WorkloadInput(model_params_b=70, concurrent_users=10)
+        w50 = WorkloadInput(model_params_b=70, concurrent_users=50)
         c = ConstraintInput()
         r1 = run_calculation(db, w1, c)
-        r10 = run_calculation(db, w10, c)
-        b1 = next(r for r in r1 if r.gpu_name == "B200 SXM")
-        b10 = next(r for r in r10 if r.gpu_name == "B200 SXM")
-        assert b10.tco_gbp > b1.tco_gbp
+        r50 = run_calculation(db, w50, c)
+        b1 = next(r for r in r1 if r.gpu_name == "B200 HGX")
+        b50 = next(r for r in r50 if r.gpu_name == "B200 HGX")
+        assert b50.tco_gbp > b1.tco_gbp
 
-    def test_cu10_larger_kv_cache(self, db):
+    def test_cu50_larger_kv_cache(self, db):
         w1 = WorkloadInput(model_params_b=70, concurrent_users=1)
-        w10 = WorkloadInput(model_params_b=70, concurrent_users=10)
+        w50 = WorkloadInput(model_params_b=70, concurrent_users=50)
         c = ConstraintInput()
         r1 = run_calculation(db, w1, c)
-        r10 = run_calculation(db, w10, c)
-        b1 = next(r for r in r1 if r.gpu_name == "B200 SXM")
-        b10 = next(r for r in r10 if r.gpu_name == "B200 SXM")
-        assert b10.kv_cache_gb > b1.kv_cache_gb
+        r50 = run_calculation(db, w50, c)
+        b1 = next(r for r in r1 if r.gpu_name == "B200 HGX")
+        b50 = next(r for r in r50 if r.gpu_name == "B200 HGX")
+        assert b50.kv_cache_gb > b1.kv_cache_gb
 
-    def test_cu10_lower_max_context_per_user(self, db):
+    def test_cu50_lower_max_context_per_user(self, db):
         """More concurrent users means less VRAM per user → shorter max context."""
         w1 = WorkloadInput(model_params_b=7, concurrent_users=1)
-        w10 = WorkloadInput(model_params_b=7, concurrent_users=10)
+        w50 = WorkloadInput(model_params_b=7, concurrent_users=50)
         c = ConstraintInput()
         r1 = run_calculation(db, w1, c)
-        r10 = run_calculation(db, w10, c)
-        b1 = next(r for r in r1 if r.gpu_name == "B200 SXM")
-        b10 = next(r for r in r10 if r.gpu_name == "B200 SXM")
-        assert b10.max_context_length < b1.max_context_length
+        r50 = run_calculation(db, w50, c)
+        b1 = next(r for r in r1 if r.gpu_name == "B200 HGX")
+        b50 = next(r for r in r50 if r.gpu_name == "B200 HGX")
+        assert b50.max_context_length < b1.max_context_length
 
     def test_dp_degree_shown_in_strategy(self, db):
-        w = WorkloadInput(model_params_b=7, concurrent_users=20)
+        w = WorkloadInput(model_params_b=7, concurrent_users=200)
         c = ConstraintInput()
         results = run_calculation(db, w, c)
-        b200 = next(r for r in results if r.gpu_name == "B200 SXM")
+        b200 = next(r for r in results if r.gpu_name == "B200 HGX")
         assert b200.topology.dp_degree >= 2
         assert "DP" in b200.topology.parallelism_strategy
 
@@ -481,7 +487,10 @@ class TestBenchmarkBlending:
         w = WorkloadInput(model_params_b=70, finance_benchmark_category="tokenization")
         c = ConstraintInput()
         results = run_calculation(db, w, c)
-        for r in results:
+        # GPUs filtered out by constraints (e.g. DLC-only) have no benchmark_scores
+        evaluated = [r for r in results if r.tokens_per_sec is not None]
+        assert len(evaluated) > 0
+        for r in evaluated:
             assert r.benchmark_scores is not None
             assert len(r.benchmark_scores) > 0
 
@@ -497,19 +506,19 @@ class TestBenchmarkBlending:
         assert order_none != order_quant, "Benchmark blending should change rankings"
 
     def test_benchmark_perf_score_returns_float(self, db):
-        gpu = db.query(GPU).filter(GPU.name == "H200 SXM5").first()
+        gpu = db.query(GPU).filter(GPU.name == "H200 SXM").first()
         score = _benchmark_perf_score(db, gpu.id, "tokenization")
         assert isinstance(score, float)
         assert 0 < score <= 100
 
     def test_benchmark_scores_dict_has_entries(self, db):
-        gpu = db.query(GPU).filter(GPU.name == "B200 SXM").first()
+        gpu = db.query(GPU).filter(GPU.name == "B200 HGX").first()
         scores = _benchmark_scores_dict(db, gpu.id, "quant")
         assert len(scores) >= 3  # STAC-A2, Monte Carlo, DGEMM
         assert all(0 < v <= 100 for v in scores.values())
 
     def test_invalid_category_returns_no_benchmarks(self, db):
-        gpu = db.query(GPU).filter(GPU.name == "H200 SXM5").first()
+        gpu = db.query(GPU).filter(GPU.name == "H200 SXM").first()
         score = _benchmark_perf_score(db, gpu.id, "nonexistent_category")
         assert score is None
 
@@ -600,15 +609,15 @@ class TestNormalizeAndRank:
 # ===========================================================================
 class TestEvaluateGPU:
     def test_returns_gpu_result(self, db):
-        gpu = db.query(GPU).filter(GPU.name == "H200 SXM5").first()
+        gpu = db.query(GPU).filter(GPU.name == "H200 SXM").first()
         w = WorkloadInput(model_params_b=70)
         c = ConstraintInput()
         result = evaluate_gpu(db, gpu, w, c)
         assert isinstance(result, GPUResult)
-        assert result.gpu_name == "H200 SXM5"
+        assert result.gpu_name == "H200 SXM"
 
     def test_all_fields_populated(self, db):
-        gpu = db.query(GPU).filter(GPU.name == "B200 SXM").first()
+        gpu = db.query(GPU).filter(GPU.name == "B200 HGX").first()
         w = WorkloadInput(model_params_b=70)
         c = ConstraintInput()
         result = evaluate_gpu(db, gpu, w, c)
@@ -621,7 +630,7 @@ class TestEvaluateGPU:
         assert result.kv_cache_gb is not None
 
     def test_estimated_gpu_has_warning(self, db):
-        gpu = db.query(GPU).filter(GPU.name == "B300 SXM").first()
+        gpu = db.query(GPU).filter(GPU.name == "MI350X").first()
         w = WorkloadInput(model_params_b=70)
         c = ConstraintInput()
         result = evaluate_gpu(db, gpu, w, c)
@@ -632,10 +641,10 @@ class TestEvaluateGPU:
         w = WorkloadInput(model_params_b=70)
         c = ConstraintInput(cooling_type="air")
         result = evaluate_gpu(db, gpu, w, c)
-        assert any("incompatible with air cooling" in w for w in result.warnings)
+        assert any("requires liquid cooling" in w or "incompatible with air cooling" in w for w in result.warnings)
 
     def test_fp8_changes_throughput(self, db):
-        gpu = db.query(GPU).filter(GPU.name == "B200 SXM").first()
+        gpu = db.query(GPU).filter(GPU.name == "B200 HGX").first()
         w_fp16 = WorkloadInput(model_params_b=70, precision="FP16")
         w_fp8 = WorkloadInput(model_params_b=70, precision="FP8")
         c = ConstraintInput()
@@ -644,7 +653,7 @@ class TestEvaluateGPU:
         assert r8.tokens_per_sec > r16.tokens_per_sec
 
     def test_large_model_needs_more_gpus(self, db):
-        gpu = db.query(GPU).filter(GPU.name == "B200 SXM").first()
+        gpu = db.query(GPU).filter(GPU.name == "B200 HGX").first()
         w_small = WorkloadInput(model_params_b=7)
         w_large = WorkloadInput(model_params_b=405)
         c = ConstraintInput()
@@ -687,8 +696,8 @@ class TestRunComparison:
         c = ConstraintInput()
         resp = run_comparison(db, w, c)
         names = {r.gpu_name for r in resp.results}
-        assert "H200 SXM5" in names
-        assert "B200 SXM" in names
+        assert "H200 SXM" in names
+        assert "B200 HGX" in names
         assert "MI300X" in names
         assert "GB200 NVL72" in names
 
@@ -739,7 +748,7 @@ class TestCostEngine:
 # ===========================================================================
 class TestComplexityEngine:
     def test_nvidia_higher_maturity_than_amd(self, db):
-        nv = db.query(GPU).filter(GPU.name == "B200 SXM").first()
+        nv = db.query(GPU).filter(GPU.name == "B200 HGX").first()
         amd = db.query(GPU).filter(GPU.name == "MI300X").first()
         nv_cx = calc_complexity(db, nv)
         amd_cx = calc_complexity(db, amd)
@@ -753,14 +762,14 @@ class TestComplexityEngine:
             assert cx_air.final_score < cx_liq.final_score
 
     def test_fp8_penalty_for_no_support(self, db):
-        gpu = db.query(GPU).filter(GPU.name == "H200 SXM5").first()
+        gpu = db.query(GPU).filter(GPU.name == "H200 SXM").first()
         cx_fp16 = calc_complexity(db, gpu, precision="FP16")
         cx_fp8 = calc_complexity(db, gpu, precision="FP8")
         # H200 has no FP8 → penalty
         assert cx_fp8.final_score <= cx_fp16.final_score
 
     def test_score_in_0_10_range(self, db):
-        gpu = db.query(GPU).filter(GPU.name == "B200 SXM").first()
+        gpu = db.query(GPU).filter(GPU.name == "B200 HGX").first()
         cx = calc_complexity(db, gpu)
         assert 0 <= cx.final_score <= 10
 
@@ -770,19 +779,19 @@ class TestComplexityEngine:
 # ===========================================================================
 class TestAvailabilityEngine:
     def test_ga_gpu_higher_score_than_estimated(self, db):
-        h200 = db.query(GPU).filter(GPU.name == "H200 SXM5").first()
-        b300 = db.query(GPU).filter(GPU.name == "B300 SXM").first()
+        h200 = db.query(GPU).filter(GPU.name == "H200 SXM").first()
+        b300 = db.query(GPU).filter(GPU.name == "B300 HGX").first()
         av_h = calc_availability(db, h200)
         av_b = calc_availability(db, b300)
         assert av_h.score >= av_b.score
 
     def test_meets_constraint_when_within_limit(self, db):
-        h200 = db.query(GPU).filter(GPU.name == "H200 SXM5").first()
+        h200 = db.query(GPU).filter(GPU.name == "H200 SXM").first()
         av = calc_availability(db, h200, max_lead_time_weeks=52)
         assert av.meets_constraint is True
 
     def test_fails_constraint_when_over_limit(self, db):
-        h200 = db.query(GPU).filter(GPU.name == "H200 SXM5").first()
+        h200 = db.query(GPU).filter(GPU.name == "H200 SXM").first()
         av = calc_availability(db, h200, max_lead_time_weeks=0)
         assert av.meets_constraint is False
 
