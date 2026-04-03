@@ -75,9 +75,6 @@ DELETE FROM price_history;
 DELETE FROM availability;
 DELETE FROM gpus;
 
--- Wrap all data inserts in a transaction
-BEGIN;
-
 -- Insert new GPU data (corrected values — see review plan for details)
 -- bf16_tflops / fp8_tflops / fp4_tflops aligned with HTML source + seed.py
 INSERT INTO gpus (name, vendor, generation, form_factor, hbm_capacity_gb, hbm_type, mem_bandwidth_tb_s, memory_gb, memory_type, memory_bandwidth_tbps, bf16_tflops, fp64_tflops, fp8_tflops, fp4_tflops, supports_fp4, tdp_watts, cooling_type, intra_node_interconnect, interconnect_bw_gb_s, interconnect_type, cooling_requirement, supported_workloads, max_gpus_per_node, is_rack_scale, rack_gpu_count, rack_fabric_bw_tb_s, msrp_usd, is_estimated, release_date, created_at, updated_at) VALUES
@@ -730,8 +727,6 @@ SELECT id, date, price_usd, source FROM (VALUES
 ('MI300X', '2025-03-01', 10500, 'market')
 ) AS t(name, date, price_usd, source)
 JOIN gpus ON gpus.name = t.name;
-
-COMMIT;
 
 -- =====================================================
 -- Verification queries
