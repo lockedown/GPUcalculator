@@ -52,6 +52,11 @@ GPU_INTERCONNECT_TO_FABRIC: dict[str, str] = {
 # ---------------------------------------------------------------------------
 # Topology
 # ---------------------------------------------------------------------------
+# Minimum acceptable decode tok/s per user — below this, the experience is
+# unusably slow.  DP replicas are added until each user can reach this rate.
+MIN_DECODE_TPS_PER_USER = 10.0
+
+
 def calc_topology(
     gpu: GPU,
     model_memory_gb: float,
@@ -59,6 +64,7 @@ def calc_topology(
     concurrent_users: int = 1,
     batch_size: int = 1,
     kv_per_user_gb: float = 0.6,
+    per_gpu_decode_tps: float = 0.0,
 ) -> TopologyResult:
     """Determine GPU count and parallelism strategy.
 
@@ -70,6 +76,10 @@ def calc_topology(
 
     `kv_per_user_gb` is the pre-computed GQA-aware KV cache per user,
     used by the PCIe path to determine per-card user capacity.
+
+    `per_gpu_decode_tps` is the calibrated single-GPU decode throughput,
+    used to compute throughput-aware DP scaling so each user gets at
+    least MIN_DECODE_TPS_PER_USER.
     """
     # Use new memory_gb field if available, otherwise fallback to hbm_capacity_gb
     single_gpu_memory = gpu.memory_gb if gpu.memory_gb is not None else gpu.hbm_capacity_gb
@@ -106,7 +116,15 @@ def calc_topology(
             users_per_card = 1
 
         total_users = concurrent_users * batch_size
-        dp_degree = max(1, math.ceil(total_users / users_per_card))
+        dp_memory = max(1, math.ceil(total_users / users_per_card))
+
+        # Throughput-aware DP: ensure each user gets MIN_DECODE_TPS_PER_USER
+        dp_throughput = 1
+        if per_gpu_decode_tps > 0 and total_users > 0:
+            required_tps = total_users * MIN_DECODE_TPS_PER_USER
+            dp_throughput = max(1, math.ceil(required_tps / per_gpu_decode_tps))
+
+        dp_degree = max(dp_memory, dp_throughput)
         gpu_count = max(min_gpus_for_model, dp_degree)
 
         return TopologyResult(
@@ -128,13 +146,19 @@ def calc_topology(
     capacity_gpus = max(min_gpus_for_model, min_gpus_for_workload)
 
     # --- DP replicas for throughput scaling ---
-    # Each DP replica serves a subset of concurrent users independently.
-    # Threshold: 1 DP replica per ~8 concurrent request-streams so that
-    # even modest concurrency (e.g. 10 users) triggers additional replicas.
+    # Throughput-aware: ensure each user gets MIN_DECODE_TPS_PER_USER.
+    # For NVLink GPUs the per-replica throughput scales with TP GPUs,
+    # so we use per_gpu_decode_tps × capacity_gpus as replica throughput.
     dp_degree = 1
     total_streams = concurrent_users * batch_size
     if total_streams > 1 and capacity_gpus <= gpus_per_node:
-        desired_dp = max(1, math.ceil(total_streams / 8))
+        replica_tps = per_gpu_decode_tps * capacity_gpus if per_gpu_decode_tps > 0 else 0
+        if replica_tps > 0:
+            required_tps = total_streams * MIN_DECODE_TPS_PER_USER
+            desired_dp = max(1, math.ceil(required_tps / replica_tps))
+        else:
+            # Fallback: 1 replica per 8 streams
+            desired_dp = max(1, math.ceil(total_streams / 8))
         dp_degree = min(desired_dp, 8)  # Cap at 8 DP replicas
 
     gpu_count = capacity_gpus * dp_degree
@@ -297,6 +321,13 @@ def evaluate_gpu(
     kv_per_user = calc_kv_cache_per_user_gb(
         workload.context_length, workload.precision, workload.model_params_b
     )
+
+    # Calibrated single-GPU decode throughput for throughput-aware DP scaling
+    raw_single_gpu_decode = perf_sizing.decode_tokens_per_sec  # gpu_count=1
+    calibrated_single_decode = calibrate_decode(
+        gpu.name, raw_single_gpu_decode, workload.precision
+    )
+
     topo = calc_topology(
         gpu,
         perf_sizing.model_memory_gb,
@@ -304,6 +335,7 @@ def evaluate_gpu(
         concurrent_users=workload.concurrent_users,
         batch_size=workload.batch_size,
         kv_per_user_gb=kv_per_user,
+        per_gpu_decode_tps=calibrated_single_decode,
     )
 
     # --- Performance: recalculate per-replica metrics with actual GPU count ---
