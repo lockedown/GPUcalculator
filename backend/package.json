@@ -1,0 +1,12 @@
+{
+  "name": "gpu-calculator-backend",
+  "version": "1.0.0",
+  "private": true,
+  "description": "GPU LLM Workload Calculator — Python/FastAPI backend (Vercel Serverless)",
+  "scripts": {
+    "vercel-build": "echo 'Python backend — no JS build step required'"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

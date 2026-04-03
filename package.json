@@ -1,0 +1,12 @@
+{
+  "name": "gpu-calculator",
+  "version": "1.0.0",
+  "private": true,
+  "description": "GPU LLM Workload Calculator — monorepo root",
+  "scripts": {
+    "vercel-build": "echo 'Python serverless backend — no JS build step required'"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
