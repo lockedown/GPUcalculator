@@ -25,14 +25,14 @@ class TestHardwareEndpoints:
         r = client.get("/api/hardware")
         assert r.status_code == 200
         data = r.json()
-        assert len(data) == 8  # B100 dropped from catalogue
+        assert len(data) == 10  # 8 from HTML + H100 SXM5 + RTX PRO 6000 BSE
 
     def test_filter_nvidia(self, client):
         r = client.get("/api/hardware?vendor=NVIDIA")
         assert r.status_code == 200
         data = r.json()
         assert all(g["vendor"] == "NVIDIA" for g in data)
-        assert len(data) == 5  # H200, B200, B300, GB200, GB300
+        assert len(data) == 7  # H100, H200, B200, B300, GB200, GB300, RTX PRO 6000 BSE
 
     def test_filter_amd(self, client):
         r = client.get("/api/hardware?vendor=AMD")
@@ -95,7 +95,7 @@ class TestCompareEndpoint:
         data = r.json()
         assert "results" in data
         assert "sweet_spot_gpu" in data
-        assert len(data["results"]) == 8  # B100 dropped from catalogue
+        assert len(data["results"]) == 10  # All seeded GPUs (HTML + extras-only)
 
     def test_results_are_ranked(self, client):
         r = client.post("/api/compare", json=self.WORKLOAD["workload"])

@@ -94,8 +94,8 @@ class TestExportEndpoint:
     def test_export_csv_has_all_gpus(self):
         r = client.post("/api/export/csv", json=self.WORKLOAD)
         lines = r.text.strip().split("\n")
-        # Header + 8 GPUs (B100 dropped from catalogue)
-        assert len(lines) == 9
+        # Header + 10 GPUs (8 from HTML + H100 SXM5 + RTX PRO 6000 BSE)
+        assert len(lines) == 11
 
     def test_export_csv_includes_rack_data(self):
         r = client.post("/api/export/csv", json=self.WORKLOAD)

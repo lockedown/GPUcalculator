@@ -13,6 +13,17 @@ from app.config import settings
 # Manual data not in the HTML: TDP, pricing, cooling, interconnect details
 GPU_EXTRA_DATA = {
     "H100 SXM5": {
+        # Spec-equivalent fields (H100 is not in the parsed HTML, so seed.py
+        # builds the GPU row entirely from this dict). See _build_gpu_from_extra.
+        "vendor": "NVIDIA",
+        "form_factor": "SXM5",
+        "hbm_capacity_gb": 80,
+        "hbm_type": "HBM3",
+        "mem_bandwidth_tb_s": 3.35,
+        "bf16_tflops": 989,   # NVIDIA dense BF16 (sparse is 1979)
+        "fp64_tflops": 67,
+        "is_estimated": False,
+        # Manual / extras
         "generation": "Hopper",
         "memory_gb": 80,
         "memory_type": "HBM3",
@@ -135,6 +146,15 @@ GPU_EXTRA_DATA = {
         "release_date": "2026-H2",
     },
     "RTX PRO 6000 BSE": {
+        # Spec-equivalent fields (not in parsed HTML — built via _build_gpu_from_extra)
+        "vendor": "NVIDIA",
+        "form_factor": "PCIe",
+        "hbm_capacity_gb": 96,        # GDDR7 — same field reused
+        "hbm_type": "GDDR7",
+        "mem_bandwidth_tb_s": 1.6,
+        "fp64_tflops": None,
+        "is_estimated": False,
+        # Manual / extras
         "generation": "Blackwell",
         "memory_gb": 96,
         "memory_type": "GDDR7",
@@ -250,8 +270,58 @@ AVAILABILITY_DATA = {
 }
 
 
+def _build_gpu_from_extra(name: str, extra: dict, verdict_text: str = "") -> GPU:
+    """Build a GPU row from GPU_EXTRA_DATA only — used for GPUs that aren't in
+    the parsed HTML benchmark file (currently H100 SXM5 and RTX PRO 6000 BSE).
+
+    The extras dict must carry the spec-equivalent fields normally provided by
+    the HTML parser: vendor, form_factor, hbm_capacity_gb, hbm_type,
+    mem_bandwidth_tb_s, bf16_tflops, fp64_tflops, is_estimated.
+    """
+    return GPU(
+        name=name,
+        vendor=extra["vendor"],
+        generation=extra.get("generation", "Unknown"),
+        form_factor=extra.get("form_factor"),
+        hbm_capacity_gb=extra.get("hbm_capacity_gb"),
+        hbm_type=extra.get("hbm_type"),
+        mem_bandwidth_tb_s=extra.get("mem_bandwidth_tb_s"),
+        memory_gb=extra.get("memory_gb"),
+        memory_type=extra.get("memory_type"),
+        memory_bandwidth_tbps=extra.get("memory_bandwidth_tbps"),
+        bf16_tflops=extra.get("bf16_tflops"),
+        fp64_tflops=extra.get("fp64_tflops"),
+        fp8_tflops=extra.get("fp8_tflops"),
+        fp4_tflops=extra.get("fp4_tflops"),
+        supports_fp4=extra.get("supports_fp4"),
+        tdp_watts=extra.get("tdp_watts"),
+        cooling_type=extra.get("cooling_type", "air"),
+        intra_node_interconnect=extra.get("intra_node_interconnect"),
+        interconnect_bw_gb_s=extra.get("interconnect_bw_gb_s"),
+        interconnect_type=extra.get("interconnect_type"),
+        cooling_requirement=extra.get("cooling_requirement"),
+        supported_workloads=extra.get("supported_workloads"),
+        max_gpus_per_node=extra.get("max_gpus_per_node", 8),
+        is_rack_scale=extra.get("is_rack_scale", False),
+        rack_gpu_count=extra.get("rack_gpu_count"),
+        rack_fabric_bw_tb_s=extra.get("rack_fabric_bw_tb_s"),
+        msrp_usd=extra.get("msrp_usd"),
+        is_estimated=extra.get("is_estimated", False),
+        release_date=extra.get("release_date"),
+        verdict=verdict_text,
+    )
+
+
 def seed_gpus(db: Session, parsed_data: dict) -> dict[str, GPU]:
-    """Seed GPUs from parsed HTML specs + manual extra data. Returns name→GPU mapping."""
+    """Seed GPUs from parsed HTML specs + manual extra data. Returns name→GPU mapping.
+
+    Two paths:
+      1. HTML-driven — for each GPU column in the benchmark HTML, merge the
+         parsed spec with GPU_EXTRA_DATA.
+      2. Extra-only — GPUs in GPU_EXTRA_DATA that the HTML doesn't carry
+         (H100 SXM5, RTX PRO 6000 BSE) are built from the extras dict alone.
+         This brings the test seed in line with neon_update.sql / production.
+    """
     gpu_map = {}
     gpu_specs = parsed_data["gpu_specs"]
     verdicts = {v.gpu_name: v for v in parsed_data["verdicts"]}
@@ -310,6 +380,16 @@ def seed_gpus(db: Session, parsed_data: dict) -> dict[str, GPU]:
         db.add(gpu)
         db.flush()
         gpu_map[spec.name] = gpu
+
+    # Seed extras that aren't represented in the HTML (require "vendor" as a
+    # marker that the entry has spec-equivalent fields filled in).
+    for name, extra in GPU_EXTRA_DATA.items():
+        if name in EXCLUDED_GPUS or name in gpu_map or "vendor" not in extra:
+            continue
+        gpu = _build_gpu_from_extra(name, extra)
+        db.add(gpu)
+        db.flush()
+        gpu_map[name] = gpu
 
     return gpu_map
 

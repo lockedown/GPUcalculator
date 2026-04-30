@@ -522,10 +522,15 @@ class TestBenchmarkBlending:
         w = WorkloadInput(model_params_b=70, finance_benchmark_category="tokenization")
         c = ConstraintInput()
         results = run_calculation(db, w, c)
-        # GPUs filtered out by constraints (e.g. DLC-only) have no benchmark_scores
-        evaluated = [r for r in results if r.tokens_per_sec is not None]
-        assert len(evaluated) > 0
-        for r in evaluated:
+        # H100 SXM5 / RTX PRO 6000 BSE are seeded from extras and have no
+        # benchmark rows; everything from the HTML matrix should have scores.
+        html_seeded = [
+            r for r in results
+            if r.tokens_per_sec is not None
+            and r.gpu_name not in {"H100 SXM5", "RTX PRO 6000 BSE"}
+        ]
+        assert len(html_seeded) > 0
+        for r in html_seeded:
             assert r.benchmark_scores is not None
             assert len(r.benchmark_scores) > 0
 
@@ -709,9 +714,10 @@ class TestRunComparison:
         c = ConstraintInput()
         resp = run_comparison(db, w, c)
         assert isinstance(resp, ComparisonResponse)
-        # 8 HTML-sourced GPUs (H200, B200, B300, GB200, GB300, MI300X, MI350X,
-        # MI355X) — B100 column is parsed but excluded via EXCLUDED_GPUS.
-        assert len(resp.results) == 8
+        # 10 GPUs total: 8 from HTML (H200, B200, B300, GB200, GB300, MI300X,
+        # MI350X, MI355X) + H100 SXM5 + RTX PRO 6000 BSE seeded from extras.
+        # B100 is parsed but excluded via EXCLUDED_GPUS.
+        assert len(resp.results) == 10
         assert resp.sweet_spot_gpu is not None
 
     def test_results_sorted_by_composite(self, db):
