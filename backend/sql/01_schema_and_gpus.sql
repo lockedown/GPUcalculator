@@ -62,7 +62,6 @@ DELETE FROM gpus;
 INSERT INTO gpus (name, vendor, generation, form_factor, hbm_capacity_gb, hbm_type, mem_bandwidth_tb_s, memory_gb, memory_type, memory_bandwidth_tbps, bf16_tflops, fp64_tflops, fp8_tflops, fp4_tflops, supports_fp4, tdp_watts, cooling_type, intra_node_interconnect, interconnect_bw_gb_s, interconnect_type, cooling_requirement, supported_workloads, max_gpus_per_node, is_rack_scale, rack_gpu_count, rack_fabric_bw_tb_s, msrp_usd, is_estimated, release_date, created_at, updated_at) VALUES
 ('H100 SXM5', 'NVIDIA', 'Hopper', 'SXM5', 80, 'HBM3', 3.35, 80, 'HBM3', 3.35, 1750, NULL, 3960, NULL, false, 700, 'air', 'NVLink 4', 900, 'NVLink 4', 'Any', '["inference", "training", "fine-tuning"]'::jsonb, 8, false, NULL, NULL, 25000, false, '2024-Q1', NOW(), NOW()),
 ('H200 SXM', 'NVIDIA', 'Hopper', 'SXM', 141, 'HBM3e', 4.8, 141, 'HBM3e', 4.8, 1970, NULL, 3960, NULL, false, 700, 'air', 'NVLink 4', 900, 'NVLink 4', 'Any', '["inference", "training", "fine-tuning"]'::jsonb, 8, false, NULL, NULL, 30000, false, '2024-Q1', NOW(), NOW()),
-('B100 HGX', 'NVIDIA', 'Blackwell', 'HGX', 192, 'HBM3e', 8.0, 192, 'HBM3e', 8.0, 1750, NULL, 3600, 14000, true, 700, 'air', 'NVLink 5', 1800, 'NVLink 5', 'Any', '["inference", "training", "fine-tuning"]'::jsonb, 8, false, NULL, NULL, 35000, false, '2025-Q1', NOW(), NOW()),
 ('B200 HGX', 'NVIDIA', 'Blackwell', 'HGX', 192, 'HBM3e', 8.0, 192, 'HBM3e', 8.0, 2250, NULL, 4500, 19000, true, 1000, 'air', 'NVLink 5', 1800, 'NVLink 5', 'Any', '["inference", "training", "fine-tuning"]'::jsonb, 8, false, NULL, NULL, 40000, false, '2025-Q1', NOW(), NOW()),
 ('B300 HGX', 'NVIDIA', 'Blackwell Ultra', 'HGX', 288, 'HBM3e', 8.0, 288, 'HBM3e', 8.0, 2250, NULL, 5600, 15000, true, 1200, 'liquid', 'NVLink 5+', 2000, 'NVLink 5+', 'DLC', '["inference", "training", "fine-tuning"]'::jsonb, 8, false, NULL, NULL, 50000, false, '2026-Q1', NOW(), NOW()),
 ('GB200 NVL72', 'NVIDIA', 'Blackwell', 'NVL72', 192, 'HBM3e', 8.0, 192, 'HBM3e', 8.0, 2250, NULL, 5000, 20000, true, 1200, 'liquid', 'NVLink 5 (NVL72)', 1800, 'NVLink 5', 'DLC', '["inference", "training", "fine-tuning"]'::jsonb, 72, true, 72, 130, 40000, false, '2025-Q2', NOW(), NOW()),
@@ -77,7 +76,6 @@ INSERT INTO availability (gpu_id, lead_time_weeks, supply_status)
 SELECT id, lead_time_weeks, supply_status FROM (VALUES
 ('H100 SXM5', 4, 'available'),
 ('H200 SXM', 8, 'available'),
-('B100 HGX', 12, 'available'),
 ('B200 HGX', 16, 'constrained'),
 ('B300 HGX', 40, 'announced'),
 ('GB200 NVL72', 24, 'constrained'),

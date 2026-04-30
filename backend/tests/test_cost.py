@@ -46,12 +46,12 @@ class TestTCO:
 class TestNetworkCost:
     def test_single_node_zero(self):
         cost = calc_network_cost(1, "IB_NDR")
-        assert cost == 15000
+        assert cost == 5000
 
     def test_multi_node_spine(self):
         cost = calc_network_cost(8, "IB_NDR")
         # > 4 nodes → 2 ports each
-        assert cost == 15000 * 16
+        assert cost == 5000 * 16
 
     def test_xdr_more_expensive(self):
         ndr = calc_network_cost(4, "IB_NDR")

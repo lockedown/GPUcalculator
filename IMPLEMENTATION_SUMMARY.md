@@ -23,12 +23,11 @@ Successfully integrated new NVIDIA Hopper and Blackwell generation architectures
 ### New GPU Specifications Added
 1. **H100 SXM5**: 80GB HBM3, Air/DLC, No FP4, All workloads
 2. **H200 SXM**: 141GB HBM3e, Air/DLC, No FP4, All workloads
-3. **B100 HGX**: 192GB HBM3e, Air/DLC, Supports FP4, All workloads
-4. **B200 HGX**: 192GB HBM3e, Air (Marginal)/DLC, Supports FP4, All workloads
-5. **B300 HGX**: 288GB HBM3e, DLC Only, Supports FP4, All workloads
-6. **GB200 NVL72**: 192GB HBM3e, DLC, Supports FP4, All workloads
-7. **GB300 NVL72**: 288GB HBM3e, DLC, Supports FP4, All workloads
-8. **RTX PRO 6000 BSE**: 96GB GDDR7, Air Only, Supports FP4, **Inference ONLY**
+3. **B200 HGX**: 192GB HBM3e, Air (Marginal)/DLC, Supports FP4, All workloads
+4. **B300 HGX**: 288GB HBM3e, DLC Only, Supports FP4, All workloads
+5. **GB200 NVL72**: 192GB HBM3e, DLC, Supports FP4, All workloads
+6. **GB300 NVL72**: 288GB HBM3e, DLC, Supports FP4, All workloads
+7. **RTX PRO 6000 BSE**: 96GB GDDR7, Air Only, Supports FP4, **Inference ONLY**
 
 ### Key Data Points
 - RTX PRO 6000 BSE: Limited to `["inference"]` workloads only

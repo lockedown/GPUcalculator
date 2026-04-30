@@ -7,7 +7,6 @@ reproduces those figures within ±15%.
 Reference values (from `Finance GPU Benchmark Matrix.html`, Llama3-70B FP16):
   GPU               Decode (tok/s)   Prefill (K tok/s)
   H200 SXM5              55              20
-  B100 SXM               90              32
   B200 SXM              115              45
   B300 SXM              170              70   (est.)
   GB200 NVL72           200              82   (rack)
@@ -23,7 +22,6 @@ from __future__ import annotations
 REFERENCE_DECODE: dict[str, float] = {
     "H100 SXM5": 40.0,
     "H200 SXM": 55.0,
-    "B100 HGX": 90.0,
     "B200 HGX": 115.0,
     "B300 HGX": 170.0,
     "GB200 NVL72": 200.0,
@@ -38,7 +36,6 @@ REFERENCE_DECODE: dict[str, float] = {
 REFERENCE_PREFILL: dict[str, float] = {
     "H100 SXM5": 14_000.0,
     "H200 SXM": 20_000.0,
-    "B100 HGX": 32_000.0,
     "B200 HGX": 45_000.0,
     "B300 HGX": 70_000.0,
     "GB200 NVL72": 82_000.0,
@@ -53,7 +50,6 @@ REFERENCE_PREFILL: dict[str, float] = {
 FP8_MULTIPLIER: dict[str, float] = {
     "H100 SXM5": 1.8,       # FP8 Transformer Engine on Hopper
     "H200 SXM": 1.8,        # Same Hopper compute die as H100
-    "B100 HGX": 1.8,
     "B200 HGX": 1.9,
     "B300 HGX": 2.1,
     "GB200 NVL72": 2.2,
@@ -88,18 +84,21 @@ _prefill_factors: dict[str, float] | None = None
 def _gpu_specs() -> dict[str, dict]:
     """Minimal GPU specs for roofline calculation (avoids DB dependency).
 
-    Values must match seed.py / HTML source data.
+    BF16 figures are *dense* TFLOPS from NVIDIA / AMD datasheets, matching the
+    HTML source ("989 BF16 TFLOPS" for Hopper, "2.25 PF BF16" for B200, etc.).
+    Sparsity (2:4) is not used in real LLM inference, so do not mix sparse
+    figures here — the calibration factor would silently absorb the difference
+    and give wrong predictions for non-Llama3-70B workloads.
     """
     return {
-        "H100 SXM5":          {"mem_bw": 3.35, "bf16": 1750},
-        "H200 SXM":           {"mem_bw": 4.8,  "bf16": 1970},
-        "B100 HGX":           {"mem_bw": 8.0,  "bf16": 1750},
+        "H100 SXM5":          {"mem_bw": 3.35, "bf16": 989},
+        "H200 SXM":           {"mem_bw": 4.8,  "bf16": 989},   # Same Hopper compute die
         "B200 HGX":           {"mem_bw": 8.0,  "bf16": 2250},
-        "B300 HGX":           {"mem_bw": 8.0,  "bf16": 2250},
-        "GB200 NVL72":        {"mem_bw": 8.0,  "bf16": 2250},
-        "GB300 NVL72":        {"mem_bw": 8.0,  "bf16": 2250},
+        "B300 HGX":           {"mem_bw": 8.0,  "bf16": 2800},  # Blackwell Ultra dense BF16 (est.)
+        "GB200 NVL72":        {"mem_bw": 8.0,  "bf16": 2250},  # per-GPU
+        "GB300 NVL72":        {"mem_bw": 8.0,  "bf16": 2800},  # per-GPU
         "RTX PRO 6000 BSE":   {"mem_bw": 1.6,  "bf16": 480},
-        "MI300X":             {"mem_bw": 3.2,  "bf16": 1300},
+        "MI300X":             {"mem_bw": 3.2,  "bf16": 1307},
         "MI350X":             {"mem_bw": 6.0,  "bf16": 1800},
         "MI355X":             {"mem_bw": 6.4,  "bf16": 2000},
     }
@@ -149,17 +148,48 @@ def get_fp8_multiplier(gpu_name: str) -> float:
     return FP8_MULTIPLIER.get(gpu_name, 1.0)
 
 
+def _precision_residual(gpu_name: str, precision: str) -> float:
+    """Residual correction for FP8/FP4 after the roofline already accounts for precision.
+
+    ``performance.py`` already encodes the precision speed-up via bytes-per-param
+    (decode, BW-bound) and TFLOPS multipliers (prefill, compute-bound) — FP8 ≈ 2×
+    BF16, FP4 ≈ 4×. Multiplying by ``FP8_MULTIPLIER`` again would double-count.
+
+    This function returns a *down-correction* only: when a GPU's measured FP8
+    ratio is below the theoretical 2× (e.g. MI300X with partial FP8 support),
+    we scale the throughput down accordingly. GPUs that meet or exceed the
+    theoretical ratio get no further adjustment.
+    """
+    if precision == "FP8":
+        theoretical = 2.0
+    elif precision == "FP4":
+        # No published FP4 ratio data; reuse FP8 ratio as a conservative proxy.
+        theoretical = 4.0
+    else:
+        return 1.0
+    measured = get_fp8_multiplier(gpu_name)
+    if measured >= theoretical:
+        return 1.0
+    return measured / theoretical
+
+
 def calibrate_decode(gpu_name: str, raw_tps: float, precision: str) -> float:
-    """Apply calibration + FP8 multiplier to raw decode tokens/sec."""
+    """Apply calibration to raw decode tokens/sec.
+
+    raw_tps already accounts for FP8/FP4 throughput gains via bytes-per-param
+    in performance.py; we apply only the per-GPU calibration factor and a
+    down-correction for hardware with weak low-precision support.
+    """
     calibrated = raw_tps * get_decode_factor(gpu_name)
-    if precision in ("FP8", "FP4"):
-        calibrated *= get_fp8_multiplier(gpu_name)
-    return calibrated
+    return calibrated * _precision_residual(gpu_name, precision)
 
 
 def calibrate_prefill(gpu_name: str, raw_tps: float, precision: str) -> float:
-    """Apply calibration + FP8 multiplier to raw prefill tokens/sec."""
+    """Apply calibration to raw prefill tokens/sec.
+
+    raw_tps already accounts for FP8/FP4 TFLOPS gains in performance.py; we
+    apply only the per-GPU calibration factor and a down-correction for
+    hardware with weak low-precision support.
+    """
     calibrated = raw_tps * get_prefill_factor(gpu_name)
-    if precision in ("FP8", "FP4"):
-        calibrated *= get_fp8_multiplier(gpu_name)
-    return calibrated
+    return calibrated * _precision_residual(gpu_name, precision)

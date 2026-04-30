@@ -114,7 +114,7 @@ print("\n=== Fix #6+7: Calibration GPU Name Alignment ===")
 from app.engine.calibration import REFERENCE_DECODE, REFERENCE_PREFILL, FP8_MULTIPLIER, _gpu_specs
 
 cal_names = set(REFERENCE_DECODE.keys())
-for name in ["H100 SXM5", "H200 SXM", "B100 HGX", "B200 HGX", "B300 HGX", "RTX PRO 6000 BSE"]:
+for name in ["H100 SXM5", "H200 SXM", "B200 HGX", "B300 HGX", "RTX PRO 6000 BSE"]:
     check(
         f"'{name}' in REFERENCE_DECODE",
         name in REFERENCE_DECODE,

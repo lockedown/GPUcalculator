@@ -72,9 +72,10 @@ class TestDecodeTokensPerSec:
         assert tps == pytest.approx(57.1, rel=0.05)
 
     def test_b300_70b_fp16(self):
-        # B300: 16 TB/s → ~114 tok/s
-        tps = calc_decode_tokens_per_sec(16.0, 70, "FP16")
-        assert tps == pytest.approx(114.3, rel=0.05)
+        # B300: 8 TB/s HBM3e (same per-stack BW as B200, more capacity)
+        # → 8e12 / (70e9 * 2) = ~57 tok/s
+        tps = calc_decode_tokens_per_sec(8.0, 70, "FP16")
+        assert tps == pytest.approx(57.1, rel=0.05)
 
     def test_fp8_doubles_throughput(self):
         tps_fp16 = calc_decode_tokens_per_sec(8.0, 70, "FP16")

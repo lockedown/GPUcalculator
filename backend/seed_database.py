@@ -18,7 +18,7 @@ try:
     
     print("Starting database seeding with new GPU data...")
     print("Database: Neon PostgreSQL")
-    print("GPU Models to add: H100, H200, B100, B200, B300, GB200, GB300, RTX PRO 6000 BSE")
+    print("GPU Models to add: H100, H200, B200, B300, GB200, GB300, RTX PRO 6000 BSE")
     print()
     
     # Run the seed

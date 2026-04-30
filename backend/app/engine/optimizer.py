@@ -39,6 +39,34 @@ from app.engine.rack_planner import plan_rack_layout
 HARD_CONSTRAINT_PENALTY = 0.30   # 30% off composite for each hard violation
 SOFT_CONSTRAINT_PENALTY = 0.10   # 10% for cooling mismatch (still usable)
 
+
+# ---------------------------------------------------------------------------
+# Stable codes for machine-readable constraint violations.
+# Frontend / API clients should rely on these, not on warning text.
+# ---------------------------------------------------------------------------
+class Violation:
+    BUDGET = "BUDGET_EXCEEDED"
+    POWER = "POWER_EXCEEDED"
+    LEAD_TIME = "LEAD_TIME_EXCEEDED"
+    COOLING_HARD = "COOLING_HARD"             # rack-scale liquid GPU on air-cooled site
+    COOLING_SOFT = "COOLING_SOFT"             # standard liquid GPU on air-cooled site
+    DLC_REQUIRED = "DLC_REQUIRED"             # GPU is DLC-only; cannot run on air-cooled site
+    WORKLOAD_INCOMPATIBLE = "WORKLOAD_INCOMPATIBLE"  # e.g. RTX PRO 6000 BSE for training
+    MODEL_TOO_LARGE = "MODEL_TOO_LARGE"       # model exceeds GPU's effective capacity
+    MARGINAL_AIR_COOLING = "MARGINAL_AIR_COOLING"
+    PRE_GA = "PRE_GA"
+
+# Codes that constitute a hard pass/fail for sweet-spot filtering
+HARD_VIOLATION_CODES: set[str] = {
+    Violation.BUDGET,
+    Violation.POWER,
+    Violation.LEAD_TIME,
+    Violation.COOLING_HARD,
+    Violation.DLC_REQUIRED,
+    Violation.WORKLOAD_INCOMPATIBLE,
+    Violation.MODEL_TOO_LARGE,
+}
+
 # Interconnect → inter-node fabric mapping
 GPU_INTERCONNECT_TO_FABRIC: dict[str, str] = {
     "NVLink 4": "IB_NDR",
@@ -55,6 +83,20 @@ GPU_INTERCONNECT_TO_FABRIC: dict[str, str] = {
 # Minimum acceptable decode tok/s per user — below this, the experience is
 # unusably slow.  DP replicas are added until each user can reach this rate.
 MIN_DECODE_TPS_PER_USER = 10.0
+
+
+def _next_power_of_two(n: int) -> int:
+    """Round up to the next power of two (1, 2, 4, 8, …).
+
+    TP all-reduce primitives (NCCL ring/tree) are most efficient at power-of-2
+    GPU counts; non-pow2 TP degrees are rare in production deployments.
+    """
+    if n <= 1:
+        return 1
+    p = 1
+    while p < n:
+        p *= 2
+    return p
 
 
 def calc_topology(
@@ -141,25 +183,39 @@ def calc_topology(
 
     # --- Standard multi-GPU sizing (NVLink-based) ---
     gpus_per_node = gpu.max_gpus_per_node or 8
-    min_gpus_for_model = max(1, math.ceil(model_memory_gb / (single_gpu_memory * 0.85)))
-    min_gpus_for_workload = max(1, math.ceil(total_memory_gb / (single_gpu_memory * 0.85)))
-    capacity_gpus = max(min_gpus_for_model, min_gpus_for_workload)
+    available_per_gpu = single_gpu_memory * 0.85  # 15% reserve for activations/buffers
 
-    # --- DP replicas for throughput scaling ---
-    # Throughput-aware: ensure each user gets MIN_DECODE_TPS_PER_USER.
-    # For NVLink GPUs the per-replica throughput scales with TP GPUs,
-    # so we use per_gpu_decode_tps × capacity_gpus as replica throughput.
-    dp_degree = 1
     total_streams = concurrent_users * batch_size
-    if total_streams > 1 and capacity_gpus <= gpus_per_node:
-        replica_tps = per_gpu_decode_tps * capacity_gpus if per_gpu_decode_tps > 0 else 0
+
+    # Step 1: minimum GPUs for the model weights alone (TP/PP capacity floor)
+    min_gpus_for_model = max(1, math.ceil(model_memory_gb / available_per_gpu))
+
+    # Step 2: estimate DP using the model-only capacity, so per-replica memory
+    # can then be sized correctly for the *fraction* of streams each replica handles
+    initial_replica_capacity = min_gpus_for_model
+    dp_degree = 1
+    if total_streams > 1 and initial_replica_capacity <= gpus_per_node:
+        replica_tps = (
+            per_gpu_decode_tps * initial_replica_capacity if per_gpu_decode_tps > 0 else 0
+        )
         if replica_tps > 0:
             required_tps = total_streams * MIN_DECODE_TPS_PER_USER
-            desired_dp = max(1, math.ceil(required_tps / replica_tps))
+            dp_degree = max(1, math.ceil(required_tps / replica_tps))
         else:
-            # Fallback: 1 replica per 8 streams
-            desired_dp = max(1, math.ceil(total_streams / 8))
-        dp_degree = min(desired_dp, 8)  # Cap at 8 DP replicas
+            dp_degree = max(1, math.ceil(total_streams / 8))
+
+    # Step 3: per-replica memory (model + KV for this replica's stream slice)
+    sequences_per_replica = max(1, math.ceil(total_streams / dp_degree))
+    per_replica_memory_gb = model_memory_gb + sequences_per_replica * kv_per_user_gb
+    capacity_gpus = max(
+        min_gpus_for_model,
+        math.ceil(per_replica_memory_gb / available_per_gpu),
+    )
+
+    # Step 4: round single-node TP up to a power of 2 for efficient all-reduce.
+    # (Multi-node configs use TP=gpus_per_node intra-node + PP across nodes.)
+    if capacity_gpus <= gpus_per_node:
+        capacity_gpus = min(_next_power_of_two(capacity_gpus), gpus_per_node)
 
     gpu_count = capacity_gpus * dp_degree
 
@@ -252,36 +308,39 @@ def evaluate_gpu(
 ) -> GPUResult:
     """Evaluate a single GPU against the workload and constraints."""
     warnings: list[str] = []
+    codes: list[str] = []
 
     # --- Hard Constraint Filtering (Phase 3) ---
-    
+
     # 1. Workload Constraint: RTX PRO 6000 BSE for training/fine-tuning
     if gpu.name == "RTX PRO 6000 BSE":
         if workload.workload_type in ["training", "fine-tuning", "pre-training"]:
-            # Return early with a result that will be filtered out
             return GPUResult(
                 gpu_id=gpu.id,
                 gpu_name=gpu.name,
                 gpu_vendor=gpu.vendor,
                 warnings=[f"{gpu.name} is not suitable for {workload.workload_type} workloads (inference only)"],
+                violation_codes=[Violation.WORKLOAD_INCOMPATIBLE],
                 is_estimated=gpu.is_estimated,
             )
-    
+
     # 2. Infrastructure Constraint: Air cooling vs high-TDP GPUs
     if constraints.cooling_type == "air":
-        # Filter out DLC-only and high-TDP GPUs for air-cooled environments
+        # Filter out DLC-only GPUs for air-cooled environments
         if gpu.cooling_requirement == "DLC":
             return GPUResult(
                 gpu_id=gpu.id,
                 gpu_name=gpu.name,
                 gpu_vendor=gpu.vendor,
                 warnings=[f"{gpu.name} requires liquid cooling (DLC mandatory)"],
+                violation_codes=[Violation.DLC_REQUIRED],
                 is_estimated=gpu.is_estimated,
             )
-        # B200 air cooling is marginal, add warning but allow
+        # B200 air cooling is marginal, advisory only
         if gpu.name in ["B200 HGX"] and gpu.tdp_watts and gpu.tdp_watts > 900:
             warnings.append(f"{gpu.name} has marginal air cooling support at {gpu.tdp_watts}W TDP")
-    
+            codes.append(Violation.MARGINAL_AIR_COOLING)
+
     # 3. 200B Model Constraint: RTX PRO 6000 BSE capacity check
     if workload.model_params_b >= 200 and gpu.name == "RTX PRO 6000 BSE":
         return GPUResult(
@@ -289,6 +348,7 @@ def evaluate_gpu(
             gpu_name=gpu.name,
             gpu_vendor=gpu.vendor,
             warnings=[f"{gpu.name} cannot handle {workload.model_params_b}B parameter models (96GB insufficient for 200B+ models)"],
+            violation_codes=[Violation.MODEL_TOO_LARGE],
             is_estimated=gpu.is_estimated,
         )
 
@@ -385,6 +445,7 @@ def evaluate_gpu(
         tdp_watts=gpu.tdp_watts,
         tokens_per_sec=effective_decode,
         network_switch_cost_usd=network_cost,
+        cooling_type=gpu.cooling_type,
     )
 
     # --- Complexity ---
@@ -408,27 +469,32 @@ def evaluate_gpu(
             db, gpu.id, workload.finance_benchmark_category
         )
 
-    # --- Warnings ---
+    # --- Warnings + structured violation codes ---
     if gpu.is_estimated:
         warnings.append(f"{gpu.name} specs are estimated (pre-GA)")
+        codes.append(Violation.PRE_GA)
     if gpu.cooling_type == "liquid" and constraints.cooling_type == "air":
         if gpu.is_rack_scale:
             warnings.append(f"{gpu.name} is incompatible with air cooling (rack-scale liquid required)")
+            codes.append(Violation.COOLING_HARD)
         else:
             warnings.append(f"{gpu.name} requires liquid cooling")
+            codes.append(Violation.COOLING_SOFT)
     if not avail.meets_constraint:
         warnings.append(
             f"{gpu.name} lead time ({avail.lead_time_weeks}w) exceeds constraint"
         )
+        codes.append(Violation.LEAD_TIME)
     if constraints.max_budget_gbp and cost.tco_36m_gbp > constraints.max_budget_gbp:
         warnings.append(
             f"TCO £{cost.tco_36m_gbp:,.0f} exceeds budget £{constraints.max_budget_gbp:,.0f}"
         )
-    # Power constraint check
+        codes.append(Violation.BUDGET)
     if constraints.max_power_per_rack_kw and cost.power_kw > constraints.max_power_per_rack_kw:
         warnings.append(
             f"Power {cost.power_kw:.1f}kW exceeds rack limit {constraints.max_power_per_rack_kw}kW"
         )
+        codes.append(Violation.POWER)
 
     # --- Rack planning ---
     rack = plan_rack_layout(
@@ -464,6 +530,8 @@ def evaluate_gpu(
     )
     if rack.density_warning:
         warnings.append(rack.density_warning)
+    # Note: rack-density warnings stay narrative-only — they're a hint to the
+    # user, not a constraint. Add a code here later if they become filterable.
 
     # Max context tokens accounting for concurrent users sharing the VRAM
     max_ctx = perf.max_context_tokens
@@ -491,6 +559,7 @@ def evaluate_gpu(
         rack_plan=rack_plan,
         benchmark_scores=bench_scores if bench_scores else None,
         warnings=warnings,
+        violation_codes=codes,
     )
 
     # Stash benchmark perf % for composite scoring (not serialised to client)
@@ -553,60 +622,44 @@ def _constraint_penalty(
     result: GPUResult,
     constraints: ConstraintInput,
 ) -> float:
-    """Return total penalty (0-1) for hard constraint violations.
+    """Return total penalty (0-1) for constraint violations.
 
-    Each violation applies a fixed penalty.  Penalties stack but cap at 0.9
-    so constrained GPUs still appear (just ranked very low).
+    Reads structured ``violation_codes`` populated by ``evaluate_gpu``. Each
+    hard violation applies ``HARD_CONSTRAINT_PENALTY``; cooling soft violation
+    applies ``SOFT_CONSTRAINT_PENALTY``. Budget penalty scales with overshoot
+    magnitude. Total caps at 0.9 so constrained GPUs still appear (ranked very
+    low) instead of disappearing.
     """
+    codes = set(result.violation_codes)
     penalty = 0.0
 
-    # Budget violation
-    if constraints.max_budget_gbp and result.tco_gbp:
-        if result.tco_gbp > constraints.max_budget_gbp:
-            overshoot = result.tco_gbp / constraints.max_budget_gbp
-            penalty += HARD_CONSTRAINT_PENALTY * min(overshoot, 3.0)
+    # Budget — scale with overshoot ratio
+    if Violation.BUDGET in codes and constraints.max_budget_gbp and result.tco_gbp:
+        overshoot = result.tco_gbp / constraints.max_budget_gbp
+        penalty += HARD_CONSTRAINT_PENALTY * min(overshoot, 3.0)
 
-    # Power violation
-    power_kw = getattr(result, "_power_kw", None)
-    if constraints.max_power_per_rack_kw and power_kw:
-        if power_kw > constraints.max_power_per_rack_kw:
-            penalty += HARD_CONSTRAINT_PENALTY
+    if Violation.POWER in codes:
+        penalty += HARD_CONSTRAINT_PENALTY
 
-    # Lead-time violation
-    if constraints.max_lead_time_weeks and result.availability_score is not None:
-        # availability_score already encodes lead-time, but check hard constraint
-        for w in result.warnings:
-            if "lead time" in w and "exceeds" in w:
-                penalty += HARD_CONSTRAINT_PENALTY
-                break
+    if Violation.LEAD_TIME in codes:
+        penalty += HARD_CONSTRAINT_PENALTY
 
-    # Cooling mismatch
-    for w in result.warnings:
-        if "incompatible with air cooling" in w:
-            penalty += HARD_CONSTRAINT_PENALTY  # rack-scale: hard violation
-            break
-        elif "requires liquid cooling" in w:
-            penalty += SOFT_CONSTRAINT_PENALTY  # standard: soft penalty
-            break
+    # Cooling: COOLING_HARD (rack-scale) > COOLING_SOFT (standard liquid GPU)
+    if Violation.COOLING_HARD in codes:
+        penalty += HARD_CONSTRAINT_PENALTY
+    elif Violation.COOLING_SOFT in codes:
+        penalty += SOFT_CONSTRAINT_PENALTY
 
     return min(penalty, 0.9)
 
 
 def _passes_all_constraints(result: GPUResult, constraints: ConstraintInput) -> bool:
-    """Check if a result passes all hard constraints (for sweet-spot selection)."""
-    if constraints.max_budget_gbp and result.tco_gbp:
-        if result.tco_gbp > constraints.max_budget_gbp:
-            return False
-    power_kw = getattr(result, "_power_kw", None)
-    if constraints.max_power_per_rack_kw and power_kw:
-        if power_kw > constraints.max_power_per_rack_kw:
-            return False
-    for w in result.warnings:
-        if "lead time" in w and "exceeds" in w:
-            return False
-        if "incompatible with air cooling" in w:
-            return False
-    return True
+    """True if no hard violations are present on this result.
+
+    Hard violations are listed in ``HARD_VIOLATION_CODES``. Soft / advisory
+    codes (COOLING_SOFT, MARGINAL_AIR_COOLING, PRE_GA) do not disqualify.
+    """
+    return not (set(result.violation_codes) & HARD_VIOLATION_CODES)
 
 
 # ---------------------------------------------------------------------------

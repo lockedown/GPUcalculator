@@ -129,7 +129,7 @@ DATABASE_URL="postgresql://user:pass@ep-xxx.neon.tech/dbname?sslmode=require" py
 
 ## GPUs Covered
 
-**NVIDIA (6):** H200 SXM5, B100 SXM, B200 SXM, B300 SXM *(est.)*, GB200 NVL72, GB300 NVL72 *(est.)*
+**NVIDIA (5):** H200 SXM5, B200 SXM, B300 SXM *(est.)*, GB200 NVL72, GB300 NVL72 *(est.)*
 
 **AMD (3):** MI300X, MI350X *(est.)*, MI355X *(est.)*
 

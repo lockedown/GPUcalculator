@@ -84,6 +84,10 @@ class GPUResult(BaseModel):
     benchmark_scores: dict[str, float] | None = None
     is_estimated: bool = False
     warnings: list[str] = []
+    # Stable machine-readable codes for constraint violations / advisories.
+    # Used by sweet-spot filtering and penalty calculation; safe for the
+    # frontend to drive icons / filter chips off of.
+    violation_codes: list[str] = []
 
 
 class ComparisonResponse(BaseModel):

@@ -16,7 +16,7 @@ MODEL_ARCHITECTURES = {
     13: {"num_layers": 40, "hidden_dim": 5120, "num_heads": 40, "num_kv_heads": 8, "head_dim": 128},
     34: {"num_layers": 48, "hidden_dim": 8192, "num_heads": 64, "num_kv_heads": 8, "head_dim": 128},
     70: {"num_layers": 80, "hidden_dim": 8192, "num_heads": 64, "num_kv_heads": 8, "head_dim": 128},
-    405: {"num_layers": 126, "hidden_dim": 16384, "num_heads": 128, "num_kv_heads": 16, "head_dim": 128},
+    405: {"num_layers": 126, "hidden_dim": 16384, "num_heads": 128, "num_kv_heads": 8, "head_dim": 128},
     1500: {"num_layers": 160, "hidden_dim": 24576, "num_heads": 192, "num_kv_heads": 24, "head_dim": 128},
 }
 

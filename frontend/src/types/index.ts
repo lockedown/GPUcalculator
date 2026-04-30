@@ -193,7 +193,6 @@ export const PRECISION_OPTIONS = ["FP4", "FP8", "FP16", "BF16", "FP32"] as const
 
 export const GPU_COLORS: Record<string, string> = {
   "H200 SXM5": "#1d6ed8",
-  "B100 SXM": "#16a34a",
   "B200 SXM": "#b45309",
   "B300 SXM": "#c2410c",
   "GB200 NVL72": "#6d28d9",

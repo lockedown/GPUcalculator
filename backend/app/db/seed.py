@@ -5,7 +5,7 @@ from pathlib import Path
 from sqlalchemy.orm import Session
 
 from app.db.database import engine, Base, SessionLocal
-from app.db.parse_benchmark_html import parse_html_file, GPU_COLUMN_ORDER
+from app.db.parse_benchmark_html import parse_html_file, GPU_COLUMN_ORDER, EXCLUDED_GPUS
 from app.models import GPU, Benchmark, Networking, SoftwareStack, Availability, PriceHistory
 from app.config import settings
 
@@ -49,26 +49,6 @@ GPU_EXTRA_DATA = {
         "is_rack_scale": False,
         "fp8_tflops": 3960,  # Same Hopper compute die as H100
         "release_date": "2024-Q1",
-    },
-    "B100 HGX": {
-        "generation": "Blackwell",
-        "memory_gb": 192,
-        "memory_type": "HBM3e",
-        "memory_bandwidth_tbps": 8.0,
-        "supports_fp4": True,
-        "interconnect_type": "NVLink 5",
-        "cooling_requirement": "Any",
-        "supported_workloads": ["inference", "training", "fine-tuning"],
-        "tdp_watts": 700,
-        "msrp_usd": 35000,
-        "cooling_type": "air",
-        "intra_node_interconnect": "NVLink 5",
-        "interconnect_bw_gb_s": 1800,
-        "max_gpus_per_node": 8,
-        "is_rack_scale": False,
-        "fp8_tflops": 3600,
-        "fp4_tflops": 14000,
-        "release_date": "2025-Q1",
     },
     "B200 HGX": {
         "generation": "Blackwell",
@@ -259,7 +239,6 @@ SOFTWARE_STACK_DATA = [
 AVAILABILITY_DATA = {
     "H100 SXM5": {"lead_time_weeks": 4, "supply_status": "available"},
     "H200 SXM": {"lead_time_weeks": 8, "supply_status": "available"},
-    "B100 HGX": {"lead_time_weeks": 12, "supply_status": "available"},
     "B200 HGX": {"lead_time_weeks": 16, "supply_status": "constrained"},
     "B300 HGX": {"lead_time_weeks": 40, "supply_status": "announced"},
     "GB200 NVL72": {"lead_time_weeks": 24, "supply_status": "constrained"},
@@ -278,6 +257,8 @@ def seed_gpus(db: Session, parsed_data: dict) -> dict[str, GPU]:
     verdicts = {v.gpu_name: v for v in parsed_data["verdicts"]}
 
     for spec in gpu_specs:
+        if spec.name in EXCLUDED_GPUS:
+            continue
         extra = GPU_EXTRA_DATA.get(spec.name, {})
         verdict = verdicts.get(spec.name)
 
@@ -343,6 +324,8 @@ def seed_benchmarks(db: Session, parsed_data: dict, gpu_map: dict[str, GPU]):
                 continue
 
             gpu_name = column_order[score.gpu_index]
+            if gpu_name in EXCLUDED_GPUS:
+                continue
             gpu = gpu_map.get(gpu_name)
             if not gpu:
                 continue
@@ -407,12 +390,6 @@ def seed_price_history(db: Session, gpu_map: dict[str, GPU]):
             ("2024-10-01", 28000, "market"),
             ("2025-01-01", 27000, "market"),
             ("2025-04-01", 25000, "market"),
-        ],
-        "B100 HGX": [
-            ("2024-07-01", 37000, "msrp"),
-            ("2024-10-01", 36000, "market"),
-            ("2025-01-01", 35000, "market"),
-            ("2025-04-01", 34000, "market"),
         ],
         "B200 HGX": [
             ("2024-10-01", 42000, "msrp"),

@@ -49,7 +49,8 @@ class GPUVerdict:
     strengths: list[str] = field(default_factory=list)
 
 
-# Map HTML-parsed GPU names to canonical names used in seed.py / calibration / DB
+# Map HTML-parsed GPU names to canonical names used in seed.py / calibration / DB.
+# B100 still maps to its canonical form so it can be filtered via EXCLUDED_GPUS.
 HTML_TO_CANONICAL: dict[str, str] = {
     "H200 SXM5": "H200 SXM",
     "B100 SXM": "B100 HGX",
@@ -57,7 +58,8 @@ HTML_TO_CANONICAL: dict[str, str] = {
     "B300 SXM": "B300 HGX",
 }
 
-# GPU column order in the HTML table (canonical names)
+# GPU column order in the HTML table (canonical names).
+# B100 is parsed but skipped at seed time — see EXCLUDED_GPUS.
 GPU_COLUMN_ORDER = [
     "H200 SXM",
     "B100 HGX",
@@ -69,6 +71,9 @@ GPU_COLUMN_ORDER = [
     "MI350X",
     "MI355X",
 ]
+
+# GPUs intentionally excluded from the platform (parsed from HTML but not seeded).
+EXCLUDED_GPUS: set[str] = {"B100 HGX"}
 
 RATING_CLASS_MAP = {
     "r-baseline": "Baseline",

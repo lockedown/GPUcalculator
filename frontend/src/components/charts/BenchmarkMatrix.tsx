@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 
 const GPU_ORDER = [
-  "H200 SXM5", "B100 SXM", "B200 SXM", "B300 SXM", "GB200 NVL72", "GB300 NVL72",
+  "H200 SXM5", "B200 SXM", "B300 SXM", "GB200 NVL72", "GB300 NVL72",
   "MI300X", "MI350X", "MI355X",
 ];
 

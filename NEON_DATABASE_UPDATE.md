@@ -39,9 +39,9 @@ neonctl sql --file backend/neon_update.sql
 
 ### 2. Data Seeding
 - **Clears existing GPU data** to ensure clean state
-- **Inserts 8 new GPU models**:
+- **Inserts 7 new GPU models**:
   - H100 SXM5, H200 SXM (Hopper generation)
-  - B100 HGX, B200 HGX, B300 HGX (Blackwell generation)  
+  - B200 HGX, B300 HGX (Blackwell generation)
   - GB200 NVL72, GB300 NVL72 (Rack-scale systems)
   - **RTX PRO 6000 BSE** (Inference-only, 96GB GDDR7)
 

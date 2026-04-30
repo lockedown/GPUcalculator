@@ -2,12 +2,17 @@
 
 from dataclasses import dataclass
 
-# Defaults
-DEFAULT_PUE = 1.3
-DEFAULT_COST_PER_KWH_GBP = 0.15
-DEFAULT_HOURS_PER_MONTH = 730
+# Defaults — refreshed against 2026 market data.
+# PUE: Uptime Institute 2025 industry average is 1.54 for legacy enterprise;
+# direct-liquid-cooled GPU pods (NVL72-class) achieve ~1.10–1.15.
+PUE_LIQUID = 1.15
+PUE_AIR = 1.30
+DEFAULT_PUE = PUE_AIR
+# UK industrial all-in electricity ~£0.17–0.18/kWh (Ofgem QEP, Mar 2026).
+DEFAULT_COST_PER_KWH_GBP = 0.17
+DEFAULT_HOURS_PER_MONTH = 730  # 8760 / 12
 DEFAULT_AMORTIZATION_MONTHS = 36
-GBP_PER_USD = 0.79  # Approximate conversion
+GBP_PER_USD = 0.74  # Spot rate, Apr 2026
 
 
 @dataclass
@@ -26,9 +31,10 @@ def calc_tco(
     tokens_per_sec: float,
     network_switch_cost_usd: float = 0.0,
     storage_cost_usd: float = 0.0,
-    pue: float = DEFAULT_PUE,
+    pue: float | None = None,
     cost_per_kwh_gbp: float = DEFAULT_COST_PER_KWH_GBP,
     amortization_months: int = DEFAULT_AMORTIZATION_MONTHS,
+    cooling_type: str | None = None,
 ) -> CostResult:
     """
     Calculate Total Cost of Ownership.
@@ -36,6 +42,9 @@ def calc_tco(
     CapEx = (gpu_price × gpu_count) + network_switch_cost + storage_cost
     OpEx_monthly = (total_tdp_kw × PUE × hours_per_month × cost_per_kwh)
     TCO = CapEx + (OpEx_monthly × amortization_months)
+
+    PUE selection: explicit ``pue`` wins; else derived from ``cooling_type``
+    ("liquid" → 1.15, "air" → 1.30); else falls back to DEFAULT_PUE.
     """
     # CapEx
     if gpu_price_usd is None:
@@ -46,7 +55,15 @@ def calc_tco(
 
     # OpEx (power)
     if tdp_watts is None:
-        tdp_watts = 700  # Conservative default
+        tdp_watts = 1000  # 2026 default — Blackwell-class
+
+    if pue is None:
+        if cooling_type == "liquid":
+            pue = PUE_LIQUID
+        elif cooling_type == "air":
+            pue = PUE_AIR
+        else:
+            pue = DEFAULT_PUE
 
     total_power_kw = (tdp_watts * gpu_count) / 1000.0
     effective_power_kw = total_power_kw * pue
@@ -70,17 +87,25 @@ def calc_tco(
 
 
 def estimate_gpu_price(gpu_count: int) -> float:
-    """Fallback price estimate if MSRP not available."""
-    return 25000.0  # Conservative estimate per GPU in USD
+    """Fallback price estimate if MSRP not available.
+
+    Generic blended midpoint: H100 ~$30k, H200 ~$35k, B200 ~$40k as of 2026.
+    """
+    return 35000.0
 
 
 def calc_network_cost(nodes: int, switch_type: str = "IB_NDR") -> float:
-    """Estimate network switch costs based on node count and switch type."""
+    """Estimate network fabric cost per host port (all-in: switch slice + NIC + optics + cabling).
+
+    2026 channel pricing — Quantum-2 NDR chassis is ~$1.5k/port, but a full host
+    port includes ConnectX-7 NIC (~$2.5k) + OSFP transceiver pair (~$1.5k), so
+    all-in lands around $5k for NDR. Other tiers scaled similarly.
+    """
     switch_costs = {
-        "IB_NDR": 15000,   # Per port, ~$15k per 400G port
-        "IB_XDR": 25000,   # Per port, ~$25k per 800G port
-        "RoCEv2": 8000,    # Per port
-        "Ethernet_400G": 5000,
+        "IB_NDR": 5000,    # 400G InfiniBand (Quantum-2)
+        "IB_XDR": 8000,    # 800G InfiniBand (Quantum-X800)
+        "RoCEv2": 3000,    # 400G RoCE
+        "Ethernet_400G": 2000,
     }
     cost_per_port = switch_costs.get(switch_type, 15000)
     # Each node needs at least 1 uplink; add spine switches for >4 nodes

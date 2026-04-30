@@ -168,16 +168,36 @@ class TestCalibration:
         calibrated = calibrate_prefill("B200 HGX", raw, "FP16")
         assert calibrated >= raw  # calibration should boost toward 45K
 
-    def test_fp8_multiplier_applied(self):
+    def test_fp8_no_double_count(self):
+        # GB200 measured FP8 ratio = 2.2 > theoretical 2.0 → no residual
+        # correction. Calibration of FP8 raw should equal calibration of FP16
+        # raw (the FP8 boost is encoded upstream in performance.py via
+        # bytes-per-param, so calibration must NOT apply it again).
+        fp16 = calibrate_decode("GB200 NVL72", 57.1, "FP16")
+        fp8 = calibrate_decode("GB200 NVL72", 57.1, "FP8")
+        assert fp8 == pytest.approx(fp16, rel=0.01)
+
+    def test_fp8_residual_correction_for_b200(self):
+        # B200 measured 1.9 vs theoretical 2.0 → residual 0.95 down-correction.
         fp16 = calibrate_decode("B200 HGX", 57.1, "FP16")
         fp8 = calibrate_decode("B200 HGX", 57.1, "FP8")
-        mult = get_fp8_multiplier("B200 HGX")
-        assert fp8 == pytest.approx(fp16 * mult, rel=0.01)
+        assert fp8 == pytest.approx(fp16 * (1.9 / 2.0), rel=0.01)
 
-    def test_fp4_also_applies_fp8_mult(self):
+    def test_fp8_down_corrects_weak_hardware(self):
+        # MI300X has weak FP8 (multiplier 1.0 vs theoretical 2.0) → calibrated
+        # FP8 should be half of calibrated FP16 to compensate for the upstream
+        # 2× boost that this GPU cannot actually deliver.
+        fp16 = calibrate_decode("MI300X", 50.0, "FP16")
+        fp8 = calibrate_decode("MI300X", 50.0, "FP8")
+        assert fp8 == pytest.approx(fp16 * 0.5, rel=0.02)
+
+    def test_fp4_residual_for_b300(self):
+        # B300 measured FP8 ratio 2.1; using as proxy for FP4 vs theoretical 4.0
+        # → residual = 2.1 / 4.0 = 0.525. Calibrated FP4 should be that
+        # fraction of calibrated FP16 (since the 4× FP4 boost is upstream).
         fp16 = calibrate_decode("B300 HGX", 100.0, "FP16")
         fp4 = calibrate_decode("B300 HGX", 100.0, "FP4")
-        assert fp4 > fp16
+        assert fp4 == pytest.approx(fp16 * (2.1 / 4.0), rel=0.02)
 
     def test_unknown_gpu_factor_is_1(self):
         assert get_decode_factor("FakeGPU 9000") == 1.0
@@ -196,10 +216,10 @@ class TestCalibration:
 # 3. CONSTRAINT PENALTIES
 # ===========================================================================
 class TestConstraintPenalty:
-    def _make_result(self, tco=100_000, warnings=None, power_kw=5.0):
+    def _make_result(self, tco=100_000, codes=None, power_kw=5.0):
         r = GPUResult(
             gpu_id=1, gpu_name="Test", gpu_vendor="NVIDIA",
-            tco_gbp=tco, warnings=warnings or [],
+            tco_gbp=tco, violation_codes=codes or [],
         )
         r._power_kw = power_kw  # type: ignore[attr-defined]
         return r
@@ -210,18 +230,18 @@ class TestConstraintPenalty:
         assert _constraint_penalty(r, c) == 0.0
 
     def test_budget_violation_penalty(self):
-        r = self._make_result(tco=200_000)
+        r = self._make_result(tco=200_000, codes=["BUDGET_EXCEEDED"])
         c = ConstraintInput(max_budget_gbp=100_000)
         assert _constraint_penalty(r, c) > 0
 
     def test_budget_overshoot_scales_penalty(self):
-        r_small = self._make_result(tco=120_000)
-        r_big = self._make_result(tco=500_000)
+        r_small = self._make_result(tco=120_000, codes=["BUDGET_EXCEEDED"])
+        r_big = self._make_result(tco=500_000, codes=["BUDGET_EXCEEDED"])
         c = ConstraintInput(max_budget_gbp=100_000)
         assert _constraint_penalty(r_big, c) > _constraint_penalty(r_small, c)
 
     def test_power_violation_penalty(self):
-        r = self._make_result(power_kw=50.0)
+        r = self._make_result(power_kw=50.0, codes=["POWER_EXCEEDED"])
         c = ConstraintInput(max_power_per_rack_kw=40.0)
         assert _constraint_penalty(r, c) > 0
 
@@ -231,20 +251,25 @@ class TestConstraintPenalty:
         assert _constraint_penalty(r, c) == 0.0
 
     def test_lead_time_violation_penalty(self):
-        r = self._make_result(warnings=["GPU lead time (20w) exceeds constraint"])
+        r = self._make_result(codes=["LEAD_TIME_EXCEEDED"])
         r.availability_score = 0.3
         c = ConstraintInput(max_lead_time_weeks=8)
         assert _constraint_penalty(r, c) > 0
 
     def test_cooling_soft_penalty(self):
-        r = self._make_result(warnings=["Test requires liquid cooling"])
+        r = self._make_result(codes=["COOLING_SOFT"])
         c = ConstraintInput()
         assert _constraint_penalty(r, c) == pytest.approx(0.10)
+
+    def test_cooling_hard_penalty(self):
+        r = self._make_result(codes=["COOLING_HARD"])
+        c = ConstraintInput()
+        assert _constraint_penalty(r, c) == pytest.approx(0.30)
 
     def test_multiple_violations_stack(self):
         r = self._make_result(
             tco=200_000,
-            warnings=["requires liquid cooling"],
+            codes=["BUDGET_EXCEEDED", "POWER_EXCEEDED", "COOLING_SOFT"],
             power_kw=100.0,
         )
         c = ConstraintInput(max_budget_gbp=100_000, max_power_per_rack_kw=40.0)
@@ -255,7 +280,7 @@ class TestConstraintPenalty:
     def test_penalty_caps_at_0_9(self):
         r = self._make_result(
             tco=10_000_000,
-            warnings=["lead time (52w) exceeds constraint", "requires liquid cooling"],
+            codes=["BUDGET_EXCEEDED", "LEAD_TIME_EXCEEDED", "COOLING_HARD", "POWER_EXCEEDED"],
             power_kw=200.0,
         )
         r.availability_score = 0.1
@@ -268,17 +293,17 @@ class TestConstraintPenalty:
         assert _passes_all_constraints(r, c) is True
 
     def test_fails_budget_constraint(self):
-        r = self._make_result(tco=200_000)
+        r = self._make_result(tco=200_000, codes=["BUDGET_EXCEEDED"])
         c = ConstraintInput(max_budget_gbp=100_000)
         assert _passes_all_constraints(r, c) is False
 
     def test_fails_power_constraint(self):
-        r = self._make_result(power_kw=100.0)
+        r = self._make_result(power_kw=100.0, codes=["POWER_EXCEEDED"])
         c = ConstraintInput(max_power_per_rack_kw=40.0)
         assert _passes_all_constraints(r, c) is False
 
     def test_fails_lead_time_constraint(self):
-        r = self._make_result(warnings=["GPU lead time (30w) exceeds constraint"])
+        r = self._make_result(codes=["LEAD_TIME_EXCEEDED"])
         c = ConstraintInput(max_lead_time_weeks=12)
         assert _passes_all_constraints(r, c) is False
 
@@ -286,6 +311,12 @@ class TestConstraintPenalty:
         r = self._make_result(tco=50_000, power_kw=5.0)
         r.availability_score = 0.8
         c = ConstraintInput(max_budget_gbp=100_000, max_power_per_rack_kw=40.0, max_lead_time_weeks=12)
+        assert _passes_all_constraints(r, c) is True
+
+    def test_soft_violation_does_not_disqualify(self):
+        # COOLING_SOFT is soft → still passes constraint check
+        r = self._make_result(codes=["COOLING_SOFT"])
+        c = ConstraintInput()
         assert _passes_all_constraints(r, c) is True
 
 
@@ -385,13 +416,17 @@ class TestTopology:
 
     def test_dp_high_concurrency(self):
         gpu = _mock_gpu()
+        # 64 users × 1 stream, no per_gpu_decode_tps → fallback ceil(64/8)=8
         topo = calc_topology(gpu, 14.0, 20.0, concurrent_users=64, batch_size=1)
-        assert topo.dp_degree == 8  # ceil(64/8) = 8, capped
+        assert topo.dp_degree == 8
 
-    def test_dp_capped_at_8(self):
+    def test_dp_scales_beyond_8_when_needed(self):
+        # DP cap was removed; very high concurrency now scales DP linearly so each
+        # user can still hit MIN_DECODE_TPS_PER_USER. With 1000 streams and the
+        # fallback ceil(streams/8) heuristic → DP=125.
         gpu = _mock_gpu()
         topo = calc_topology(gpu, 14.0, 20.0, concurrent_users=1000, batch_size=1)
-        assert topo.dp_degree <= 8
+        assert topo.dp_degree == 125
 
     def test_dp_disabled_when_model_exceeds_node(self):
         """When capacity_gpus > gpus_per_node, DP is not added."""
@@ -587,17 +622,20 @@ class TestNormalizeAndRank:
         assert ranked_cost[0].gpu_name == "SlowCheap"
 
     def test_constraint_penalty_lowers_score(self):
-        results = self._make_results()
+        # In production, evaluate_gpu sets BUDGET_EXCEEDED when tco exceeds the
+        # budget; normalize_and_rank only consumes pre-set codes. Mirror that
+        # contract here so the penalty path is exercised.
         c_no_budget = ConstraintInput()
         c_budget = ConstraintInput(max_budget_gbp=80_000)
-        ranked_free = normalize_and_rank(
-            [GPUResult(**r.model_dump()) for r in self._make_results()],
-            c_no_budget.metric_weights, c_no_budget,
-        )
-        ranked_budget = normalize_and_rank(
-            [GPUResult(**r.model_dump()) for r in self._make_results()],
-            c_budget.metric_weights, c_budget,
-        )
+
+        free = self._make_results()
+        budget = self._make_results()
+        for r in budget:
+            if r.tco_gbp and r.tco_gbp > 80_000:
+                r.violation_codes = ["BUDGET_EXCEEDED"]
+
+        ranked_free = normalize_and_rank(free, c_no_budget.metric_weights, c_no_budget)
+        ranked_budget = normalize_and_rank(budget, c_budget.metric_weights, c_budget)
         # FastExpensive (TCO=200K > budget 80K) should have lower score with budget
         fe_free = next(r for r in ranked_free if r.gpu_name == "FastExpensive")
         fe_budget = next(r for r in ranked_budget if r.gpu_name == "FastExpensive")
@@ -671,7 +709,9 @@ class TestRunComparison:
         c = ConstraintInput()
         resp = run_comparison(db, w, c)
         assert isinstance(resp, ComparisonResponse)
-        assert len(resp.results) == 9
+        # 8 HTML-sourced GPUs (H200, B200, B300, GB200, GB300, MI300X, MI350X,
+        # MI355X) — B100 column is parsed but excluded via EXCLUDED_GPUS.
+        assert len(resp.results) == 8
         assert resp.sweet_spot_gpu is not None
 
     def test_results_sorted_by_composite(self, db):
