@@ -6,7 +6,7 @@ from dataclasses import dataclass
 # PUE: Uptime Institute 2025 industry average is 1.54 for legacy enterprise;
 # direct-liquid-cooled GPU pods (NVL72-class) achieve ~1.10–1.15.
 PUE_LIQUID = 1.15
-PUE_AIR = 1.30
+PUE_AIR = 1.40  # Uptime 2025 industry avg is 1.54; 1.40 is the modern AI-focused air bracket
 DEFAULT_PUE = PUE_AIR
 
 # US enterprise / large-industrial all-in electricity rate. EIA 2026 national
@@ -48,7 +48,7 @@ def calc_tco(
     TCO = CapEx + (OpEx_monthly × amortization_months)
 
     PUE selection: explicit ``pue`` wins; else derived from ``cooling_type``
-    ("liquid" → 1.15, "air" → 1.30); else falls back to DEFAULT_PUE.
+    ("liquid" → 1.15, "air" → 1.40); else falls back to DEFAULT_PUE.
     """
     # CapEx
     if gpu_price_usd is None:

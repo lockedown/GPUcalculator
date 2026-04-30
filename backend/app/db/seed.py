@@ -33,7 +33,8 @@ GPU_EXTRA_DATA = {
         "cooling_requirement": "Any",
         "supported_workloads": ["inference", "training", "fine-tuning"],
         "tdp_watts": 700,
-        "msrp_usd": 25000,
+        # 2026 SXM5 channel reality is $30-35k; was $25k at 2024 launch.
+        "msrp_usd": 30000,
         "cooling_type": "air",
         "intra_node_interconnect": "NVLink 4",
         "interconnect_bw_gb_s": 900,
@@ -111,7 +112,8 @@ GPU_EXTRA_DATA = {
         "cooling_requirement": "DLC",
         "supported_workloads": ["inference", "training", "fine-tuning"],
         "tdp_watts": 1200,
-        "msrp_usd": 40000,
+        # Per-GPU equivalent: rack pricing $3.0-3.4M / 72 GPUs ≈ $42-47k.
+        "msrp_usd": 45000,
         "cooling_type": "liquid",
         "intra_node_interconnect": "NVLink 5 (NVL72)",
         "interconnect_bw_gb_s": 1800,
@@ -133,7 +135,8 @@ GPU_EXTRA_DATA = {
         "cooling_requirement": "DLC",
         "supported_workloads": ["inference", "training", "fine-tuning"],
         "tdp_watts": 1400,
-        "msrp_usd": 55000,
+        # Per-GPU equivalent: rack pricing $6.0-6.5M / 72 GPUs ≈ $83-90k.
+        "msrp_usd": 75000,
         "cooling_type": "liquid",
         "intra_node_interconnect": "NVLink 5+ (NVL72)",
         "interconnect_bw_gb_s": 2000,
@@ -223,7 +226,8 @@ GPU_EXTRA_DATA = {
         "cooling_requirement": "Any",
         "supported_workloads": ["inference", "training", "fine-tuning"],
         "tdp_watts": 750,
-        "msrp_usd": 32000,
+        # UBS: AMD MI350-series ~$25k post-67% price hike; MI355X scaled slightly higher.
+        "msrp_usd": 26000,
         "cooling_type": "air",
         "intra_node_interconnect": "Infinity Fabric v4",
         "interconnect_bw_gb_s": 1600,
