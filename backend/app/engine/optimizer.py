@@ -485,9 +485,9 @@ def evaluate_gpu(
             f"{gpu.name} lead time ({avail.lead_time_weeks}w) exceeds constraint"
         )
         codes.append(Violation.LEAD_TIME)
-    if constraints.max_budget_gbp and cost.tco_36m_gbp > constraints.max_budget_gbp:
+    if constraints.max_budget_usd and cost.tco_36m_usd > constraints.max_budget_usd:
         warnings.append(
-            f"TCO £{cost.tco_36m_gbp:,.0f} exceeds budget £{constraints.max_budget_gbp:,.0f}"
+            f"TCO ${cost.tco_36m_usd:,.0f} exceeds budget ${constraints.max_budget_usd:,.0f}"
         )
         codes.append(Violation.BUDGET)
     if constraints.max_power_per_rack_kw and cost.power_kw > constraints.max_power_per_rack_kw:
@@ -549,10 +549,10 @@ def evaluate_gpu(
         decode_tokens_per_sec=effective_decode,
         kv_cache_gb=perf_sizing.kv_cache_gb,   # Total KV for all sequences
         max_context_length=max_ctx,
-        tco_gbp=cost.tco_36m_gbp,
-        capex_gbp=cost.capex_gbp,
-        opex_monthly_gbp=cost.opex_monthly_gbp,
-        tokens_per_gbp=cost.tokens_per_gbp_per_month,
+        tco_usd=cost.tco_36m_usd,
+        capex_usd=cost.capex_usd,
+        opex_monthly_usd=cost.opex_monthly_usd,
+        tokens_per_usd=cost.tokens_per_usd_per_month,
         complexity_score=complexity.final_score,
         availability_score=avail.score,
         topology=topo,
@@ -574,7 +574,7 @@ def evaluate_gpu(
 def _rank_normalize(values: list[float | None], higher_is_better: bool = True) -> list[float]:
     """Convert raw values to 0-1 scores using rank percentile.
 
-    Rank-based normalization is robust to outliers (e.g. NVL72 £3.6M TCO
+    Rank-based normalization is robust to outliers (e.g. NVL72 $4M+ TCO
     doesn't compress all other GPUs into a narrow band).
 
     Ties receive the same rank.  None values get 0.0.
@@ -634,8 +634,8 @@ def _constraint_penalty(
     penalty = 0.0
 
     # Budget — scale with overshoot ratio
-    if Violation.BUDGET in codes and constraints.max_budget_gbp and result.tco_gbp:
-        overshoot = result.tco_gbp / constraints.max_budget_gbp
+    if Violation.BUDGET in codes and constraints.max_budget_usd and result.tco_usd:
+        overshoot = result.tco_usd / constraints.max_budget_usd
         penalty += HARD_CONSTRAINT_PENALTY * min(overshoot, 3.0)
 
     if Violation.POWER in codes:
@@ -681,7 +681,7 @@ def normalize_and_rank(
         [r.tokens_per_sec for r in results], higher_is_better=True
     )
     cost_scores = _rank_normalize(
-        [r.tco_gbp for r in results], higher_is_better=False  # lower cost = better
+        [r.tco_usd for r in results], higher_is_better=False  # lower cost = better
     )
     cx_scores = _rank_normalize(
         [r.complexity_score for r in results], higher_is_better=True

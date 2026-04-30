@@ -81,7 +81,7 @@ export interface WorkloadInput {
 }
 
 export interface ConstraintInput {
-  max_budget_gbp: number | null;
+  max_budget_usd: number | null;
   max_power_per_rack_kw: number | null;
   cooling_type: string;
   max_lead_time_weeks: number | null;
@@ -136,10 +136,10 @@ export interface GPUResult {
   decode_tokens_per_sec: number | null;
   kv_cache_gb: number | null;
   max_context_length: number | null;
-  tco_gbp: number | null;
-  capex_gbp: number | null;
-  opex_monthly_gbp: number | null;
-  tokens_per_gbp: number | null;
+  tco_usd: number | null;
+  capex_usd: number | null;
+  opex_monthly_usd: number | null;
+  tokens_per_usd: number | null;
   complexity_score: number | null;
   availability_score: number | null;
   composite_score: number | null;

@@ -1,4 +1,4 @@
-"""TCO calculation engine — CapEx + OpEx over 36 months."""
+"""TCO calculation engine — CapEx + OpEx over 36 months, denominated in USD."""
 
 from dataclasses import dataclass
 
@@ -8,19 +8,23 @@ from dataclasses import dataclass
 PUE_LIQUID = 1.15
 PUE_AIR = 1.30
 DEFAULT_PUE = PUE_AIR
-# UK industrial all-in electricity ~£0.17–0.18/kWh (Ofgem QEP, Mar 2026).
-DEFAULT_COST_PER_KWH_GBP = 0.17
+
+# US enterprise / large-industrial all-in electricity rate. EIA 2026 national
+# industrial average is ~$0.085/kWh; major DC markets (NoVA, Phoenix, Dallas)
+# are $0.057–$0.068/kWh wholesale; hyperscaler PPAs $0.056–$0.066/kWh.
+# $0.10 is a defensible single default for a self-operated enterprise GPU
+# cluster (slightly above wholesale to capture transmission + small overhead).
+DEFAULT_COST_PER_KWH_USD = 0.10
 DEFAULT_HOURS_PER_MONTH = 730  # 8760 / 12
 DEFAULT_AMORTIZATION_MONTHS = 36
-GBP_PER_USD = 0.74  # Spot rate, Apr 2026
 
 
 @dataclass
 class CostResult:
-    capex_gbp: float
-    opex_monthly_gbp: float
-    tco_36m_gbp: float
-    tokens_per_gbp_per_month: float
+    capex_usd: float
+    opex_monthly_usd: float
+    tco_36m_usd: float
+    tokens_per_usd_per_month: float
     power_kw: float
 
 
@@ -32,12 +36,12 @@ def calc_tco(
     network_switch_cost_usd: float = 0.0,
     storage_cost_usd: float = 0.0,
     pue: float | None = None,
-    cost_per_kwh_gbp: float = DEFAULT_COST_PER_KWH_GBP,
+    cost_per_kwh_usd: float = DEFAULT_COST_PER_KWH_USD,
     amortization_months: int = DEFAULT_AMORTIZATION_MONTHS,
     cooling_type: str | None = None,
 ) -> CostResult:
     """
-    Calculate Total Cost of Ownership.
+    Calculate Total Cost of Ownership in USD.
 
     CapEx = (gpu_price × gpu_count) + network_switch_cost + storage_cost
     OpEx_monthly = (total_tdp_kw × PUE × hours_per_month × cost_per_kwh)
@@ -51,7 +55,6 @@ def calc_tco(
         gpu_price_usd = estimate_gpu_price(gpu_count)
 
     capex_usd = (gpu_price_usd * gpu_count) + network_switch_cost_usd + storage_cost_usd
-    capex_gbp = capex_usd * GBP_PER_USD
 
     # OpEx (power)
     if tdp_watts is None:
@@ -67,27 +70,27 @@ def calc_tco(
 
     total_power_kw = (tdp_watts * gpu_count) / 1000.0
     effective_power_kw = total_power_kw * pue
-    opex_monthly = effective_power_kw * DEFAULT_HOURS_PER_MONTH * cost_per_kwh_gbp
+    opex_monthly = effective_power_kw * DEFAULT_HOURS_PER_MONTH * cost_per_kwh_usd
 
     # TCO
-    tco = capex_gbp + (opex_monthly * amortization_months)
+    tco = capex_usd + (opex_monthly * amortization_months)
 
-    # Tokens per £
+    # Tokens per dollar (per month)
     tokens_per_month = tokens_per_sec * 3600 * 24 * 30  # Assume continuous operation
     monthly_cost = tco / amortization_months
-    tokens_per_gbp = tokens_per_month / monthly_cost if monthly_cost > 0 else 0
+    tokens_per_usd = tokens_per_month / monthly_cost if monthly_cost > 0 else 0
 
     return CostResult(
-        capex_gbp=capex_gbp,
-        opex_monthly_gbp=opex_monthly,
-        tco_36m_gbp=tco,
-        tokens_per_gbp_per_month=tokens_per_gbp,
+        capex_usd=capex_usd,
+        opex_monthly_usd=opex_monthly,
+        tco_36m_usd=tco,
+        tokens_per_usd_per_month=tokens_per_usd,
         power_kw=total_power_kw,
     )
 
 
 def estimate_gpu_price(gpu_count: int) -> float:
-    """Fallback price estimate if MSRP not available.
+    """Fallback price estimate (USD) if MSRP not available.
 
     Generic blended midpoint: H100 ~$30k, H200 ~$35k, B200 ~$40k as of 2026.
     """
@@ -95,7 +98,7 @@ def estimate_gpu_price(gpu_count: int) -> float:
 
 
 def calc_network_cost(nodes: int, switch_type: str = "IB_NDR") -> float:
-    """Estimate network fabric cost per host port (all-in: switch slice + NIC + optics + cabling).
+    """Estimate network fabric cost (USD) per host port (all-in: switch slice + NIC + optics + cabling).
 
     2026 channel pricing — Quantum-2 NDR chassis is ~$1.5k/port, but a full host
     port includes ConnectX-7 NIC (~$2.5k) + OSFP transceiver pair (~$1.5k), so
@@ -107,7 +110,7 @@ def calc_network_cost(nodes: int, switch_type: str = "IB_NDR") -> float:
         "RoCEv2": 3000,    # 400G RoCE
         "Ethernet_400G": 2000,
     }
-    cost_per_port = switch_costs.get(switch_type, 15000)
+    cost_per_port = switch_costs.get(switch_type, 5000)
     # Each node needs at least 1 uplink; add spine switches for >4 nodes
     ports_needed = nodes
     if nodes > 4:

@@ -31,11 +31,11 @@ export default function BubbleScatter({ results, width = 800, height = 480 }: Pr
       .attr("transform", `translate(${margin.left},${margin.top})`);
 
     // Filter out rack-scale for readability unless only rack-scale exists
-    const data = results.filter((r) => r.tco_gbp != null && r.tokens_per_sec != null);
+    const data = results.filter((r) => r.tco_usd != null && r.tokens_per_sec != null);
     if (data.length === 0) return;
 
     // Scales
-    const xExtent = d3.extent(data, (d) => d.tco_gbp!) as [number, number];
+    const xExtent = d3.extent(data, (d) => d.tco_usd!) as [number, number];
     const yExtent = d3.extent(data, (d) => d.tokens_per_sec!) as [number, number];
 
     const x = d3.scaleLog().domain([Math.max(1, xExtent[0] * 0.8), xExtent[1] * 1.2]).range([0, w]).nice();
@@ -89,7 +89,7 @@ export default function BubbleScatter({ results, width = 800, height = 480 }: Pr
       .attr("font-size", "11px")
       .attr("fill", "#9ca3af")
       .attr("font-family", "monospace")
-      .text("Total Cost of Ownership (£)");
+      .text("Total Cost of Ownership ($)");
 
     g.append("text")
       .attr("x", -h / 2)
@@ -122,7 +122,7 @@ export default function BubbleScatter({ results, width = 800, height = 480 }: Pr
       .selectAll("circle")
       .data(data)
       .join("circle")
-      .attr("cx", (d) => x(d.tco_gbp!))
+      .attr("cx", (d) => x(d.tco_usd!))
       .attr("cy", (d) => y(d.tokens_per_sec!))
       .attr("r", 0)
       .attr("fill", (d) => GPU_COLORS[d.gpu_name] || colorScale(d.complexity_score ?? 5))
@@ -145,7 +145,7 @@ export default function BubbleScatter({ results, width = 800, height = 480 }: Pr
           .style("opacity", 1)
           .html(
             `<div style="font-weight:600;margin-bottom:4px;color:${GPU_COLORS[d.gpu_name] || "#333"}">${d.gpu_name}</div>
-             <div style="color:#6b7280">TCO: ${formatCurrency(d.tco_gbp)}</div>
+             <div style="color:#6b7280">TCO: ${formatCurrency(d.tco_usd)}</div>
              <div style="color:#6b7280">Decode: ${formatNumber(d.tokens_per_sec)} tok/s</div>
              <div style="color:#6b7280">Complexity: ${d.complexity_score?.toFixed(1)}/10</div>
              <div style="color:#6b7280">Availability: ${((d.availability_score ?? 0) * 100).toFixed(0)}%</div>
@@ -168,7 +168,7 @@ export default function BubbleScatter({ results, width = 800, height = 480 }: Pr
       .data(data)
       .join("text")
       .attr("class", "label")
-      .attr("x", (d) => x(d.tco_gbp!))
+      .attr("x", (d) => x(d.tco_usd!))
       .attr("y", (d) => y(d.tokens_per_sec!) - sizeScale(d.availability_score ?? 0.3) - 5)
       .attr("text-anchor", "middle")
       .attr("font-size", "9px")

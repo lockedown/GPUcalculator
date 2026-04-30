@@ -116,7 +116,7 @@ export default function GPUDeepDivePage() {
   const radarData = gpuResult
     ? [
         { metric: "Performance", value: normalize(gpuResult.decode_tokens_per_sec, comparison?.results.map((r) => r.decode_tokens_per_sec ?? 0) ?? []) },
-        { metric: "Cost Efficiency", value: normalize(gpuResult.tco_gbp, comparison?.results.map((r) => r.tco_gbp ?? 0) ?? [], true) },
+        { metric: "Cost Efficiency", value: normalize(gpuResult.tco_usd, comparison?.results.map((r) => r.tco_usd ?? 0) ?? [], true) },
         { metric: "Simplicity", value: normalize(gpuResult.complexity_score, comparison?.results.map((r) => r.complexity_score ?? 0) ?? []) },
         { metric: "Availability", value: normalize(gpuResult.availability_score, comparison?.results.map((r) => r.availability_score ?? 0) ?? []) },
       ]
@@ -125,9 +125,9 @@ export default function GPUDeepDivePage() {
   // Cost breakdown data
   const costData = gpuResult
     ? [
-        { name: "CapEx", value: gpuResult.capex_gbp ?? 0, fill: "#3b82f6" },
-        { name: "OpEx (36m)", value: (gpuResult.opex_monthly_gbp ?? 0) * 36, fill: "#10b981" },
-        { name: "Network (est.)", value: Math.max(0, (gpuResult.tco_gbp ?? 0) - (gpuResult.capex_gbp ?? 0) - (gpuResult.opex_monthly_gbp ?? 0) * 36), fill: "#8b5cf6" },
+        { name: "CapEx", value: gpuResult.capex_usd ?? 0, fill: "#3b82f6" },
+        { name: "OpEx (36m)", value: (gpuResult.opex_monthly_usd ?? 0) * 36, fill: "#10b981" },
+        { name: "Network (est.)", value: Math.max(0, (gpuResult.tco_usd ?? 0) - (gpuResult.capex_usd ?? 0) - (gpuResult.opex_monthly_usd ?? 0) * 36), fill: "#8b5cf6" },
       ]
     : [];
 
@@ -429,19 +429,19 @@ export default function GPUDeepDivePage() {
                 <div className="space-y-3">
                   <div className="flex items-center justify-between">
                     <span className="text-xs text-gray-500">Total TCO</span>
-                    <span className="font-mono text-sm font-bold text-gray-900">{formatCurrency(gpuResult.tco_gbp)}</span>
+                    <span className="font-mono text-sm font-bold text-gray-900">{formatCurrency(gpuResult.tco_usd)}</span>
                   </div>
                   <div className="flex items-center justify-between">
                     <span className="text-xs text-gray-500">CapEx</span>
-                    <span className="font-mono text-sm text-blue-600">{formatCurrency(gpuResult.capex_gbp)}</span>
+                    <span className="font-mono text-sm text-blue-600">{formatCurrency(gpuResult.capex_usd)}</span>
                   </div>
                   <div className="flex items-center justify-between">
                     <span className="text-xs text-gray-500">OpEx/month</span>
-                    <span className="font-mono text-sm text-emerald-600">{formatCurrency(gpuResult.opex_monthly_gbp)}</span>
+                    <span className="font-mono text-sm text-emerald-600">{formatCurrency(gpuResult.opex_monthly_usd)}</span>
                   </div>
                   <div className="flex items-center justify-between">
-                    <span className="text-xs text-gray-500">Tokens/£/month</span>
-                    <span className="font-mono text-sm text-gray-700">{formatNumber(gpuResult.tokens_per_gbp)}</span>
+                    <span className="text-xs text-gray-500">Tokens/$/month</span>
+                    <span className="font-mono text-sm text-gray-700">{formatNumber(gpuResult.tokens_per_usd)}</span>
                   </div>
 
                   {/* Stacked bar */}

@@ -38,7 +38,7 @@ export default function Dashboard() {
       { key: "availability", label: "fastest delivery", w: w.availability },
     ];
     axes.sort((a, b) => b.w - a.w);
-    const within = constraints.max_budget_gbp ? " within budget" : "";
+    const within = constraints.max_budget_usd ? " within budget" : "";
     return `${axes[0].label}${within}`;
   })();
 
@@ -107,14 +107,14 @@ export default function Dashboard() {
             <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-widest text-violet-600">
               <Banknote className="h-3.5 w-3.5" /> 36-month TCO
               <InfoTooltip learnMore="tco">
-                CapEx (hardware + network, USD→GBP at 0.74) + OpEx (TDP × PUE × 730 h × £0.17/kWh, monthly) over 36 months.
+                CapEx (hardware + network) + OpEx (TDP × PUE × 730 h × $0.10/kWh, monthly) over 36 months. All figures in USD.
               </InfoTooltip>
             </div>
             <div className="mt-2 text-lg font-bold text-gray-900">
-              {formatCurrency(sweetSpot.tco_gbp)}
+              {formatCurrency(sweetSpot.tco_usd)}
             </div>
             <div className="mt-0.5 text-[11px] text-gray-500">
-              {formatNumber(sweetSpot.tokens_per_gbp)} tok / £ / mo
+              {formatNumber(sweetSpot.tokens_per_usd)} tok / $ / mo
             </div>
           </Card>
         </div>

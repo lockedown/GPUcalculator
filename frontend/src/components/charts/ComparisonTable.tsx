@@ -14,7 +14,7 @@ function exportCSV(results: GPUResult[]) {
   const headers = [
     "Rank", "GPU", "Vendor", "Score",
     "Decode tok/s", "Prefill tok/s",
-    "TCO (GBP)", "CapEx (GBP)", "OpEx/mo (GBP)", "Tokens/GBP/mo",
+    "TCO (USD)", "CapEx (USD)", "OpEx/mo (USD)", "Tokens/USD/mo",
     "Complexity", "Availability",
     "GPU Count", "Nodes", "Strategy",
     "Racks", "Power/Rack (kW)", "PDU Tier",
@@ -27,10 +27,10 @@ function exportCSV(results: GPUResult[]) {
     r.composite_score?.toFixed(4) ?? "",
     r.decode_tokens_per_sec?.toFixed(0) ?? "",
     r.prefill_tokens_per_sec?.toFixed(0) ?? "",
-    r.tco_gbp?.toFixed(0) ?? "",
-    r.capex_gbp?.toFixed(0) ?? "",
-    r.opex_monthly_gbp?.toFixed(0) ?? "",
-    r.tokens_per_gbp?.toFixed(0) ?? "",
+    r.tco_usd?.toFixed(0) ?? "",
+    r.capex_usd?.toFixed(0) ?? "",
+    r.opex_monthly_usd?.toFixed(0) ?? "",
+    r.tokens_per_usd?.toFixed(0) ?? "",
     r.complexity_score?.toFixed(2) ?? "",
     r.availability_score?.toFixed(2) ?? "",
     r.topology?.gpu_count ?? "",
@@ -108,7 +108,7 @@ export default function ComparisonTable({ results, sweetSpot, loading }: Props) 
               <th className="px-3 py-3 font-semibold text-gray-500 text-right">Decode tok/s</th>
               <th className="px-3 py-3 font-semibold text-gray-500 text-right">Prefill tok/s</th>
               <th className="px-3 py-3 font-semibold text-gray-500 text-right">TCO (36m)</th>
-              <th className="px-3 py-3 font-semibold text-gray-500 text-right">Tokens/£/mo</th>
+              <th className="px-3 py-3 font-semibold text-gray-500 text-right">Tokens/$/mo</th>
               <th className="px-3 py-3 font-semibold text-gray-500 text-right">Complexity</th>
               <th className="px-3 py-3 font-semibold text-gray-500 text-right">Availability</th>
               <th className="px-3 py-3 font-semibold text-gray-500">Topology</th>
@@ -157,10 +157,10 @@ export default function ComparisonTable({ results, sweetSpot, loading }: Props) 
                     {formatNumber(r.prefill_tokens_per_sec)}
                   </td>
                   <td className="px-3 py-2.5 text-right font-mono text-gray-700">
-                    {formatCurrency(r.tco_gbp)}
+                    {formatCurrency(r.tco_usd)}
                   </td>
                   <td className="px-3 py-2.5 text-right font-mono text-gray-700">
-                    {formatNumber(r.tokens_per_gbp)}
+                    {formatNumber(r.tokens_per_usd)}
                   </td>
                   <td className="px-3 py-2.5 text-right">
                     <Badge variant={

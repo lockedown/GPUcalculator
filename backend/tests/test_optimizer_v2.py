@@ -219,7 +219,7 @@ class TestConstraintPenalty:
     def _make_result(self, tco=100_000, codes=None, power_kw=5.0):
         r = GPUResult(
             gpu_id=1, gpu_name="Test", gpu_vendor="NVIDIA",
-            tco_gbp=tco, violation_codes=codes or [],
+            tco_usd=tco, violation_codes=codes or [],
         )
         r._power_kw = power_kw  # type: ignore[attr-defined]
         return r
@@ -231,13 +231,13 @@ class TestConstraintPenalty:
 
     def test_budget_violation_penalty(self):
         r = self._make_result(tco=200_000, codes=["BUDGET_EXCEEDED"])
-        c = ConstraintInput(max_budget_gbp=100_000)
+        c = ConstraintInput(max_budget_usd=100_000)
         assert _constraint_penalty(r, c) > 0
 
     def test_budget_overshoot_scales_penalty(self):
         r_small = self._make_result(tco=120_000, codes=["BUDGET_EXCEEDED"])
         r_big = self._make_result(tco=500_000, codes=["BUDGET_EXCEEDED"])
-        c = ConstraintInput(max_budget_gbp=100_000)
+        c = ConstraintInput(max_budget_usd=100_000)
         assert _constraint_penalty(r_big, c) > _constraint_penalty(r_small, c)
 
     def test_power_violation_penalty(self):
@@ -272,7 +272,7 @@ class TestConstraintPenalty:
             codes=["BUDGET_EXCEEDED", "POWER_EXCEEDED", "COOLING_SOFT"],
             power_kw=100.0,
         )
-        c = ConstraintInput(max_budget_gbp=100_000, max_power_per_rack_kw=40.0)
+        c = ConstraintInput(max_budget_usd=100_000, max_power_per_rack_kw=40.0)
         penalty = _constraint_penalty(r, c)
         # Budget + power + cooling = should be > any single penalty
         assert penalty > 0.30
@@ -284,7 +284,7 @@ class TestConstraintPenalty:
             power_kw=200.0,
         )
         r.availability_score = 0.1
-        c = ConstraintInput(max_budget_gbp=100, max_power_per_rack_kw=10, max_lead_time_weeks=4)
+        c = ConstraintInput(max_budget_usd=100, max_power_per_rack_kw=10, max_lead_time_weeks=4)
         assert _constraint_penalty(r, c) <= 0.9
 
     def test_passes_all_no_constraints(self):
@@ -294,7 +294,7 @@ class TestConstraintPenalty:
 
     def test_fails_budget_constraint(self):
         r = self._make_result(tco=200_000, codes=["BUDGET_EXCEEDED"])
-        c = ConstraintInput(max_budget_gbp=100_000)
+        c = ConstraintInput(max_budget_usd=100_000)
         assert _passes_all_constraints(r, c) is False
 
     def test_fails_power_constraint(self):
@@ -310,7 +310,7 @@ class TestConstraintPenalty:
     def test_passes_within_all_limits(self):
         r = self._make_result(tco=50_000, power_kw=5.0)
         r.availability_score = 0.8
-        c = ConstraintInput(max_budget_gbp=100_000, max_power_per_rack_kw=40.0, max_lead_time_weeks=12)
+        c = ConstraintInput(max_budget_usd=100_000, max_power_per_rack_kw=40.0, max_lead_time_weeks=12)
         assert _passes_all_constraints(r, c) is True
 
     def test_soft_violation_does_not_disqualify(self):
@@ -475,7 +475,7 @@ class TestConcurrentUsersImpact:
         r50 = run_calculation(db, w50, c)
         b1 = next(r for r in r1 if r.gpu_name == "B200 HGX")
         b50 = next(r for r in r50 if r.gpu_name == "B200 HGX")
-        assert b50.tco_gbp > b1.tco_gbp
+        assert b50.tco_usd > b1.tco_usd
 
     def test_cu50_larger_kv_cache(self, db):
         w1 = WorkloadInput(model_params_b=70, concurrent_users=1)
@@ -577,7 +577,7 @@ class TestNormalizeAndRank:
         ]):
             r = GPUResult(
                 gpu_id=i, gpu_name=name, gpu_vendor="TEST",
-                tokens_per_sec=tps, tco_gbp=tco,
+                tokens_per_sec=tps, tco_usd=tco,
                 complexity_score=cx, availability_score=av,
                 warnings=[],
             )
@@ -631,12 +631,12 @@ class TestNormalizeAndRank:
         # budget; normalize_and_rank only consumes pre-set codes. Mirror that
         # contract here so the penalty path is exercised.
         c_no_budget = ConstraintInput()
-        c_budget = ConstraintInput(max_budget_gbp=80_000)
+        c_budget = ConstraintInput(max_budget_usd=80_000)
 
         free = self._make_results()
         budget = self._make_results()
         for r in budget:
-            if r.tco_gbp and r.tco_gbp > 80_000:
+            if r.tco_usd and r.tco_usd > 80_000:
                 r.violation_codes = ["BUDGET_EXCEEDED"]
 
         ranked_free = normalize_and_rank(free, c_no_budget.metric_weights, c_no_budget)
@@ -666,7 +666,7 @@ class TestEvaluateGPU:
         result = evaluate_gpu(db, gpu, w, c)
         assert result.tokens_per_sec is not None and result.tokens_per_sec > 0
         assert result.prefill_tokens_per_sec is not None and result.prefill_tokens_per_sec > 0
-        assert result.tco_gbp is not None and result.tco_gbp > 0
+        assert result.tco_usd is not None and result.tco_usd > 0
         assert result.complexity_score is not None
         assert result.availability_score is not None
         assert result.topology is not None
@@ -729,13 +729,13 @@ class TestRunComparison:
 
     def test_sweet_spot_passes_constraints(self, db):
         w = WorkloadInput(model_params_b=70)
-        c = ConstraintInput(max_budget_gbp=100_000)
+        c = ConstraintInput(max_budget_usd=100_000)
         resp = run_comparison(db, w, c)
         sweet = next(r for r in resp.results if r.gpu_name == resp.sweet_spot_gpu)
         # Sweet spot should be within budget (if any GPU is)
-        within_budget = [r for r in resp.results if r.tco_gbp and r.tco_gbp <= 100_000]
+        within_budget = [r for r in resp.results if r.tco_usd and r.tco_usd <= 100_000]
         if within_budget:
-            assert sweet.tco_gbp <= 100_000
+            assert sweet.tco_usd <= 100_000
 
     def test_all_gpus_present(self, db):
         w = WorkloadInput(model_params_b=70)
@@ -763,16 +763,16 @@ class TestCostEngine:
     def test_tco_increases_with_gpu_count(self):
         c1 = calc_tco(1, 30_000, 700, 100.0)
         c4 = calc_tco(4, 30_000, 700, 100.0)
-        assert c4.tco_36m_gbp > c1.tco_36m_gbp
+        assert c4.tco_36m_usd > c1.tco_36m_usd
 
     def test_tco_includes_network_cost(self):
         c_no_net = calc_tco(4, 30_000, 700, 100.0, network_switch_cost_usd=0)
         c_net = calc_tco(4, 30_000, 700, 100.0, network_switch_cost_usd=60_000)
-        assert c_net.tco_36m_gbp > c_no_net.tco_36m_gbp
+        assert c_net.tco_36m_usd > c_no_net.tco_36m_usd
 
-    def test_tokens_per_gbp_positive(self):
+    def test_tokens_per_usd_positive(self):
         c = calc_tco(1, 30_000, 700, 100.0)
-        assert c.tokens_per_gbp_per_month > 0
+        assert c.tokens_per_usd_per_month > 0
 
     def test_network_cost_scales_with_nodes(self):
         c2 = calc_network_cost(2)
@@ -786,7 +786,7 @@ class TestCostEngine:
 
     def test_fallback_price_when_none(self):
         c = calc_tco(1, None, 700, 100.0)
-        assert c.capex_gbp > 0
+        assert c.capex_usd > 0
 
 
 # ===========================================================================

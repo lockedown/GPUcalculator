@@ -53,7 +53,7 @@ export default function ConstraintSliders() {
           {/* Budget */}
           <div className="flex flex-col gap-1.5">
             <label className="flex items-center gap-1 text-[11px] font-medium text-gray-500">
-              Max Budget (£)
+              Max Budget ($)
               <InfoTooltip learnMore="constraints">
                 36-month TCO ceiling. GPUs over the limit get a score penalty
                 proportional to how badly they exceed it (capped at 90%).
@@ -63,8 +63,8 @@ export default function ConstraintSliders() {
               min={0}
               nullable
               placeholder="No limit"
-              value={constraints.max_budget_gbp}
-              onChange={(v) => setConstraints({ max_budget_gbp: v })}
+              value={constraints.max_budget_usd}
+              onChange={(v) => setConstraints({ max_budget_usd: v })}
             />
           </div>
 

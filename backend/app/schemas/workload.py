@@ -19,7 +19,7 @@ class WorkloadInput(BaseModel):
 
 
 class ConstraintInput(BaseModel):
-    max_budget_gbp: float | None = Field(None, description="Maximum budget in GBP")
+    max_budget_usd: float | None = Field(None, description="Maximum 36-month TCO budget in USD")
     max_power_per_rack_kw: float | None = Field(None, description="Max power per rack in kW")
     cooling_type: str = Field("air", description="air or liquid")
     max_lead_time_weeks: int | None = Field(None, description="Max acceptable lead time in weeks")
@@ -72,10 +72,10 @@ class GPUResult(BaseModel):
     decode_tokens_per_sec: float | None = None
     kv_cache_gb: float | None = None
     max_context_length: int | None = None
-    tco_gbp: float | None = None
-    capex_gbp: float | None = None
-    opex_monthly_gbp: float | None = None
-    tokens_per_gbp: float | None = None
+    tco_usd: float | None = None
+    capex_usd: float | None = None
+    opex_monthly_usd: float | None = None
+    tokens_per_usd: float | None = None
     complexity_score: float | None = None
     availability_score: float | None = None
     composite_score: float | None = None

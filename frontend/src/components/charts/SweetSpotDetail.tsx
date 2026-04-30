@@ -62,8 +62,8 @@ export default function SweetSpotDetail({ result, loading }: Props) {
   const t = result.topology;
   const r = result.rack_plan;
   const totalGpus = t?.gpu_count ?? 0;
-  const monthlyOpex = result.opex_monthly_gbp ?? 0;
-  const monthlyAmortised = (result.tco_gbp ?? 0) / 36;
+  const monthlyOpex = result.opex_monthly_usd ?? 0;
+  const monthlyAmortised = (result.tco_usd ?? 0) / 36;
   const monthlyCapexShare = Math.max(0, monthlyAmortised - monthlyOpex);
 
   const advisoryCodes = result.violation_codes.filter((c) => c in CODE_LABELS);
@@ -150,12 +150,12 @@ export default function SweetSpotDetail({ result, loading }: Props) {
         <Section
           icon={<Banknote className="h-3.5 w-3.5" />}
           title="36-month TCO"
-          tooltip="CapEx (hardware × USD→GBP 0.74) + OpEx (TDP × cooling-aware PUE × £0.17/kWh × 730 h/mo × 36)."
+          tooltip="CapEx (hardware + network) + OpEx (TDP × cooling-aware PUE × $0.10/kWh × 730 h/mo × 36). All figures in USD."
           learnMore="tco"
         >
           <Row
             label="CapEx (hardware + network)"
-            value={formatCurrency(result.capex_gbp)}
+            value={formatCurrency(result.capex_usd)}
           />
           <Row
             label="OpEx / month (power × PUE)"
@@ -167,7 +167,7 @@ export default function SweetSpotDetail({ result, loading }: Props) {
           />
           <Row
             label="Total 36-mo TCO"
-            value={formatCurrency(result.tco_gbp)}
+            value={formatCurrency(result.tco_usd)}
             valueClass="font-semibold text-gray-900"
           />
         </Section>
@@ -176,7 +176,7 @@ export default function SweetSpotDetail({ result, loading }: Props) {
         <Section
           icon={<TrendingUp className="h-3.5 w-3.5" />}
           title="Throughput economics"
-          tooltip="Tokens/£/mo divides aggregate decode by amortised monthly cost — a value-per-pound metric that often flips rankings vs raw throughput."
+          tooltip="Tokens/$/mo divides aggregate decode by amortised monthly cost — a value-per-dollar metric that often flips rankings vs raw throughput."
           learnMore="tco"
         >
           <Row
@@ -188,8 +188,8 @@ export default function SweetSpotDetail({ result, loading }: Props) {
             value={`${formatNumber(result.prefill_tokens_per_sec)} tok/s`}
           />
           <Row
-            label="Tokens / £ / month"
-            value={formatNumber(result.tokens_per_gbp)}
+            label="Tokens / $ / month"
+            value={formatNumber(result.tokens_per_usd)}
             valueClass="text-emerald-600 font-semibold"
           />
         </Section>

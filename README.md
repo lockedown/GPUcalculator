@@ -145,7 +145,7 @@ DATABASE_URL="postgresql://user:pass@ep-xxx.neon.tech/dbname?sslmode=require" py
 ## Calculation Engine
 
 - **Performance**: Roofline model (prefill=compute-bound, decode=memory-BW-bound), KV cache sizing, multi-node degradation, calibration against HTML ground-truth
-- **Cost**: 36-month TCO (CapEx + OpEx), tokens per £ per month, interconnect-aware network costs
+- **Cost**: 36-month TCO (CapEx + OpEx) in USD, tokens per $ per month, interconnect-aware network costs
 - **Complexity**: Software stack maturity + penalties (cooling, FP8 support, rack-scale)
 - **Availability**: Lead time scoring with supply status weighting
 - **Rack Planner**: Layout, power budgets, PDU tiers, cooling capacity, density warnings

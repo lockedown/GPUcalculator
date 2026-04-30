@@ -135,20 +135,28 @@ export default function MethodologyPage() {
         {/* TCO */}
         <Section id="tco" title="TCO (CapEx + OpEx)">
           <p>
-            Total Cost of Ownership over 36 months, in pounds.
+            Total Cost of Ownership over 36 months, in US dollars. All prices
+            in the catalogue (GPU MSRPs, network fabric, electricity) are
+            denominated in USD; no FX conversion is applied.
           </p>
           <h3 className="text-sm font-semibold text-gray-900 mt-3">CapEx</h3>
           <ul className="list-disc pl-5 space-y-1">
             <li><code className="bg-gray-100 px-1 rounded text-[11px]">gpu_price_USD × gpu_count</code></li>
-            <li>+ network fabric cost (per-host all-in: switch slice + NIC + optics)</li>
+            <li>+ network fabric cost (all-in per host port: switch slice + NIC + optics)</li>
             <li>+ optional storage cost</li>
-            <li>× <code className="bg-gray-100 px-1 rounded text-[11px]">GBP_PER_USD = 0.74</code> (Apr 2026 spot)</li>
           </ul>
           <h3 className="text-sm font-semibold text-gray-900 mt-3">OpEx (monthly)</h3>
           <p>
             <code className="bg-gray-100 px-1 rounded text-[11px]">
-              total_TDP_kW × PUE × 730 hours × £0.17/kWh
+              total_TDP_kW × PUE × 730 hours × $0.10/kWh
             </code>
+          </p>
+          <p>
+            The default <strong>$0.10/kWh</strong> targets a US enterprise
+            self-operated cluster — sits above wholesale (NoVA / Phoenix /
+            Dallas average $0.057–$0.068/kWh) and PPAs ($0.056–$0.066/kWh)
+            but below colocation retail (~$0.27/kWh including facility
+            overhead). EIA national industrial average is ~$0.085/kWh.
           </p>
           <p>
             <strong>PUE</strong> (Power Usage Effectiveness) accounts for
@@ -163,8 +171,8 @@ export default function MethodologyPage() {
             </code>
           </p>
           <p>
-            <strong>Tokens per £ per month</strong> divides aggregate
-            throughput by the monthly amortised cost — a value-per-pound
+            <strong>Tokens per $ per month</strong> divides aggregate
+            throughput by the monthly amortised cost — a value-per-dollar
             metric that often flips rankings vs raw throughput.
           </p>
         </Section>
@@ -230,7 +238,7 @@ export default function MethodologyPage() {
           </p>
           <h3 className="text-sm font-semibold text-gray-900 mt-3">User-set hard limits</h3>
           <ul className="list-disc pl-5 space-y-1">
-            <li><strong>Max budget (£)</strong> — TCO ceiling. Penalty scales with overshoot ratio.</li>
+            <li><strong>Max budget ($)</strong> — TCO ceiling in USD. Penalty scales with overshoot ratio.</li>
             <li><strong>Max power per rack (kW)</strong> — flat 30% penalty if exceeded.</li>
             <li><strong>Max lead time (weeks)</strong> — flat 30% penalty if exceeded.</li>
           </ul>
@@ -250,7 +258,7 @@ export default function MethodologyPage() {
           <p>
             Every GPU is scored on four axes: <strong>performance</strong>,
             <strong> cost</strong>, <strong>complexity</strong>, and{" "}
-            <strong>availability</strong>. To avoid one outlier (a £3M NVL72 rack)
+            <strong>availability</strong>. To avoid one outlier (a $4M NVL72 rack)
             crushing the cost axis, raw values are <em>rank-normalised</em> across
             the candidate set: best gets 1.0, worst gets 0.0.
           </p>
@@ -287,10 +295,11 @@ export default function MethodologyPage() {
               prompts may be over-predicted.
             </li>
             <li>
-              <strong>OpEx omits</strong> colocation rental (~£170/kW/month
-              typical), hardware maintenance contracts (~10% of CapEx/year),
-              and software licensing (e.g. NVIDIA AI Enterprise ~$1k/GPU/year).
-              Add roughly £4–8k/GPU/year for a hosted enterprise cluster.
+              <strong>OpEx omits</strong> colocation rental (~$200/kW/month
+              typical for major US DC markets), hardware maintenance contracts
+              (~10% of CapEx/year), and software licensing (e.g. NVIDIA AI
+              Enterprise ~$1k/GPU/year). Add roughly $5–10k/GPU/year for a
+              hosted enterprise cluster.
             </li>
             <li>
               <strong>Pre-GA SKUs</strong> (B300, GB300, MI350X, MI355X) use

@@ -58,7 +58,7 @@ const DEFAULT_WORKLOAD: WorkloadInput = {
 };
 
 const DEFAULT_CONSTRAINTS: ConstraintInput = {
-  max_budget_gbp: null,
+  max_budget_usd: null,
   max_power_per_rack_kw: null,
   cooling_type: "air",
   max_lead_time_weeks: null,

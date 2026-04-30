@@ -14,7 +14,7 @@ export function formatNumber(n: number | null | undefined, decimals = 0): string
 
 export function formatCurrency(n: number | null | undefined): string {
   if (n == null) return "—";
-  return `£${n.toLocaleString("en-GB", { maximumFractionDigits: 0 })}`;
+  return `$${n.toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
 }
 
 export function ratingColor(rating: string | null): string {
