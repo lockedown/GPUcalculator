@@ -148,6 +148,9 @@ export interface GPUResult {
   benchmark_scores: Record<string, number> | null;
   is_estimated: boolean;
   warnings: string[];
+  // Stable codes for constraint violations / advisories. See backend
+  // `app.engine.optimizer.Violation` for the full list.
+  violation_codes: string[];
 }
 
 export interface PriceHistoryEntry {

@@ -60,14 +60,8 @@ export const api = {
   compare: (workload: WorkloadInput, constraints?: ConstraintInput) =>
     fetchJSON<ComparisonResponse>(`${API_BASE}/compare`, {
       method: "POST",
-      body: JSON.stringify(workload),
-    }).catch(() =>
-      // Fallback: try nested format if flat fails
-      fetchJSON<ComparisonResponse>(`${API_BASE}/compare`, {
-        method: "POST",
-        body: JSON.stringify({ workload, constraints }),
-      })
-    ),
+      body: JSON.stringify({ workload, constraints }),
+    }),
   prices: {
     list: () => fetchJSON<PriceHistoryByGPU[]>(`${API_BASE}/prices`),
     get: (gpuId: number) => fetchJSON<PriceHistoryByGPU>(`${API_BASE}/prices/${gpuId}`),

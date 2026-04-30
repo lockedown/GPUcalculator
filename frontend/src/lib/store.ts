@@ -36,9 +36,10 @@ interface AppState {
   runComparison: () => Promise<void>;
 }
 
-// Debounce helper — delays execution until idle for `ms` milliseconds
+// Debounce helper — delays execution until idle for `ms` milliseconds.
+// 250 ms feels live without flooding the API while a slider is being dragged.
 let _debounceTimer: ReturnType<typeof setTimeout> | null = null;
-function debouncedCompare(fn: () => void, ms = 500) {
+function debouncedCompare(fn: () => void, ms = 250) {
   if (_debounceTimer) clearTimeout(_debounceTimer);
   _debounceTimer = setTimeout(fn, ms);
 }

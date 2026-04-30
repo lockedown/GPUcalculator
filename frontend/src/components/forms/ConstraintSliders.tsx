@@ -2,7 +2,7 @@
 
 import { useStore } from "@/lib/store";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
+import { NumericInput } from "@/components/ui/numeric-input";
 import { Slider } from "@/components/ui/slider";
 import {
   Select,
@@ -32,24 +32,24 @@ export default function ConstraintSliders() {
           {/* Budget */}
           <div className="flex flex-col gap-1.5">
             <label className="text-[11px] font-medium text-gray-500">Max Budget (£)</label>
-            <Input
-              type="number"
+            <NumericInput
               min={0}
+              nullable
               placeholder="No limit"
-              value={constraints.max_budget_gbp ?? ""}
-              onChange={(e) => setConstraints({ max_budget_gbp: e.target.value ? +e.target.value : null })}
+              value={constraints.max_budget_gbp}
+              onChange={(v) => setConstraints({ max_budget_gbp: v })}
             />
           </div>
 
           {/* Power */}
           <div className="flex flex-col gap-1.5">
             <label className="text-[11px] font-medium text-gray-500">Max Power/Rack (kW)</label>
-            <Input
-              type="number"
+            <NumericInput
               min={0}
+              nullable
               placeholder="No limit"
-              value={constraints.max_power_per_rack_kw ?? ""}
-              onChange={(e) => setConstraints({ max_power_per_rack_kw: e.target.value ? +e.target.value : null })}
+              value={constraints.max_power_per_rack_kw}
+              onChange={(v) => setConstraints({ max_power_per_rack_kw: v })}
             />
           </div>
 
@@ -73,12 +73,12 @@ export default function ConstraintSliders() {
           {/* Lead Time */}
           <div className="flex flex-col gap-1.5">
             <label className="text-[11px] font-medium text-gray-500">Max Lead Time (wks)</label>
-            <Input
-              type="number"
+            <NumericInput
               min={0}
+              nullable
               placeholder="No limit"
-              value={constraints.max_lead_time_weeks ?? ""}
-              onChange={(e) => setConstraints({ max_lead_time_weeks: e.target.value ? +e.target.value : null })}
+              value={constraints.max_lead_time_weeks}
+              onChange={(v) => setConstraints({ max_lead_time_weeks: v })}
             />
           </div>
         </div>

@@ -3,8 +3,7 @@
 import { useStore } from "@/lib/store";
 import { WORKLOAD_CATEGORIES, PRECISION_OPTIONS, BENCHMARK_CATEGORIES } from "@/types";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
+import { NumericInput } from "@/components/ui/numeric-input";
 import {
   Select,
   SelectTrigger,
@@ -12,7 +11,7 @@ import {
   SelectContent,
   SelectItem,
 } from "@/components/ui/select";
-import { Play, Loader2 } from "lucide-react";
+import { Loader2 } from "lucide-react";
 
 const CONTEXT_OPTIONS = [
   { value: 2048, label: "2K" },
@@ -25,24 +24,27 @@ const CONTEXT_OPTIONS = [
 ];
 
 export default function WorkloadForm() {
-  const { workload, setWorkload, runComparison, loading } = useStore();
+  const { workload, setWorkload, loading } = useStore();
 
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Workload Configuration</CardTitle>
+        <CardTitle className="flex items-center gap-2">
+          Workload Configuration
+          {loading && <Loader2 className="h-3.5 w-3.5 animate-spin text-blue-500" />}
+        </CardTitle>
       </CardHeader>
       <CardContent>
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
+        <div className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-6">
           {/* Model Size */}
           <div className="flex flex-col gap-1.5">
             <label className="text-[11px] font-medium text-gray-500">Model Size (B params)</label>
-            <Input
-              type="number"
+            <NumericInput
               min={1}
               max={2000}
+              fallback={70}
               value={workload.model_params_b}
-              onChange={(e) => setWorkload({ model_params_b: +e.target.value || 1 })}
+              onChange={(v) => setWorkload({ model_params_b: v ?? 1 })}
             />
           </div>
 
@@ -82,12 +84,12 @@ export default function WorkloadForm() {
           {/* Concurrent Users */}
           <div className="flex flex-col gap-1.5">
             <label className="text-[11px] font-medium text-gray-500">Concurrent Users</label>
-            <Input
-              type="number"
+            <NumericInput
               min={1}
               max={100000}
+              fallback={1}
               value={workload.concurrent_users}
-              onChange={(e) => setWorkload({ concurrent_users: +e.target.value || 1 })}
+              onChange={(v) => setWorkload({ concurrent_users: v ?? 1 })}
             />
           </div>
 
@@ -144,23 +146,23 @@ export default function WorkloadForm() {
             <>
               <div className="flex flex-col gap-1.5">
                 <label className="text-[11px] font-medium text-gray-500">Total Experts</label>
-                <Input
-                  type="number"
+                <NumericInput
                   min={2}
                   max={128}
+                  fallback={8}
                   value={workload.num_experts}
-                  onChange={(e) => setWorkload({ num_experts: +e.target.value || 8 })}
+                  onChange={(v) => setWorkload({ num_experts: v ?? 8 })}
                   className="w-20"
                 />
               </div>
               <div className="flex flex-col gap-1.5">
                 <label className="text-[11px] font-medium text-gray-500">Active Experts</label>
-                <Input
-                  type="number"
+                <NumericInput
                   min={1}
                   max={workload.num_experts}
+                  fallback={2}
                   value={workload.active_experts}
-                  onChange={(e) => setWorkload({ active_experts: +e.target.value || 2 })}
+                  onChange={(v) => setWorkload({ active_experts: v ?? 2 })}
                   className="w-20"
                 />
               </div>
@@ -170,14 +172,6 @@ export default function WorkloadForm() {
             </>
           )}
         </div>
-
-        <Button onClick={runComparison} disabled={loading} className="mt-4" size="sm">
-          {loading ? (
-            <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Calculating…</>
-          ) : (
-            <><Play className="h-3.5 w-3.5" /> Run Comparison</>
-          )}
-        </Button>
       </CardContent>
     </Card>
   );
