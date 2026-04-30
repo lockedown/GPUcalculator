@@ -6,7 +6,20 @@ from sqlalchemy.orm import Session
 
 from app.models import GPU, Availability
 
-BASELINE_WEEKS = 8  # Reference lead time for scoring
+# Reference lead time for the score curve. Picked at 8 weeks because it
+# matches H200's typical 2026 availability and gives a clean 0.5 score.
+BASELINE_WEEKS = 8
+
+# Multipliers applied after the base score:
+#   - GA-shipping GPUs get a small uplift (rewards proven supply chain)
+#   - Pre-GA / announced GPUs are heavily discounted (you can't actually buy them)
+#   - "constrained" is the implicit baseline (no multiplier)
+STATUS_BOOST_AVAILABLE = 1.2
+STATUS_PENALTY_ANNOUNCED = 0.5
+
+# Defaults when no Availability row exists for a GPU
+DEFAULT_LEAD_TIME_WEEKS = 20
+DEFAULT_SUPPLY_STATUS = "constrained"
 
 
 @dataclass
@@ -22,32 +35,28 @@ def calc_availability(
     gpu: GPU,
     max_lead_time_weeks: int | None = None,
 ) -> AvailabilityResult:
-    """
-    Calculate availability score.
-    Formula: 1.0 / (1 + lead_time_weeks / baseline_weeks)
+    """Calculate availability score.
+
+    score = 1 / (1 + lead_time_weeks / BASELINE_WEEKS), then a status
+    multiplier is applied. Score saturates at 1.0.
     """
     avail = db.query(Availability).filter(Availability.gpu_id == gpu.id).first()
 
-    if not avail:
-        # Default for unknown availability
-        lead_time = 20
-        status = "constrained"
-    else:
+    if avail:
         lead_time = avail.lead_time_weeks
         status = avail.supply_status
+    else:
+        lead_time = DEFAULT_LEAD_TIME_WEEKS
+        status = DEFAULT_SUPPLY_STATUS
 
-    # Score: higher = better availability
     score = 1.0 / (1.0 + lead_time / BASELINE_WEEKS)
 
-    # Boost for "available" status
     if status == "available":
-        score = min(1.0, score * 1.2)
+        score = min(1.0, score * STATUS_BOOST_AVAILABLE)
     elif status == "announced":
-        score *= 0.5  # Heavily penalize pre-announcement GPUs
+        score *= STATUS_PENALTY_ANNOUNCED
 
-    meets = True
-    if max_lead_time_weeks is not None:
-        meets = lead_time <= max_lead_time_weeks
+    meets = max_lead_time_weeks is None or lead_time <= max_lead_time_weeks
 
     return AvailabilityResult(
         lead_time_weeks=lead_time,

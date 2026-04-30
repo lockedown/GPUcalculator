@@ -3,15 +3,18 @@
 Computes rack density, cooling capacity, PDU constraints, and physical
 layout for a GPU deployment topology.
 
-Industry standard rack specs:
+Industry standard rack specs (2026):
   - Standard 42U rack
-  - Typical PDU: 2× 60A/208V three-phase = ~25kW per PDU, 50kW total
-  - High-density liquid-cooled racks: up to 100-120kW per rack
-  - Air-cooled racks: typically capped at 20-30kW
+  - Standard air-cooled: ~25 kW per rack PDU (2× 60A/208V 3-phase)
+  - High-density air (rear-door heat exchanger): ~40 kW per rack
+  - Liquid-cooled (DLC): 100-120 kW (B200/GB200 NVL72 class)
+  - Ultra-dense liquid (B300/GB300+, custom CDUs): 120-132 kW
 """
 
 from dataclasses import dataclass
 import math
+
+from app.engine.cost import PUE_LIQUID, PUE_AIR
 
 
 # --- Rack hardware constants ---
@@ -26,11 +29,17 @@ SERVER_FORM_FACTORS: dict[str, dict] = {
     "NVL36": {"u_height": 21, "max_gpus": 36, "label": "Half-rack NVL36"},
 }
 
-# PDU tiers
+# PDU tiers — max_kw is the rack-power envelope per tier.
+# cooling_kw is the matched per-rack heat-removal capacity for that tier:
+#   - standard_air: hot/cold aisle containment only
+#   - high_density_air: rear-door heat exchanger or in-row cooling
+#   - liquid_cooled: direct-to-chip (B200 / GB200 NVL72 class)
+#   - ultra_liquid: high-flow CDUs for B300 / GB300 / Vera Rubin class
 PDU_TIERS: dict[str, dict] = {
     "standard_air": {
         "label": "Standard Air-Cooled",
         "max_kw": 25.0,
+        "cooling_kw": 25.0,
         "pdu_count": 2,
         "voltage": 208,
         "amps_per_pdu": 60,
@@ -38,6 +47,7 @@ PDU_TIERS: dict[str, dict] = {
     "high_density_air": {
         "label": "High-Density Air-Cooled",
         "max_kw": 40.0,
+        "cooling_kw": 40.0,
         "pdu_count": 2,
         "voltage": 415,
         "amps_per_pdu": 60,
@@ -45,6 +55,7 @@ PDU_TIERS: dict[str, dict] = {
     "liquid_cooled": {
         "label": "Liquid-Cooled",
         "max_kw": 100.0,
+        "cooling_kw": 120.0,
         "pdu_count": 2,
         "voltage": 415,
         "amps_per_pdu": 150,
@@ -52,21 +63,22 @@ PDU_TIERS: dict[str, dict] = {
     "ultra_liquid": {
         "label": "Ultra-Dense Liquid",
         "max_kw": 120.0,
+        "cooling_kw": 132.0,
         "pdu_count": 4,
         "voltage": 415,
         "amps_per_pdu": 150,
     },
 }
 
-# Cooling capacity by type (kW removable per rack)
-COOLING_CAPACITY: dict[str, float] = {
-    "air": 30.0,       # Best-case with hot/cold aisle containment
-    "liquid": 120.0,    # Direct-to-chip liquid cooling
-}
-
-# Overhead: networking, management, UPS per rack
-OVERHEAD_KW_PER_RACK = 1.5     # TOR switch + BMC + misc
+# Per-rack overhead — TOR switch + BMC + UPS + misc.
+# 3 kW reflects modern Spectrum-X / Quantum-2 TORs (~2.5 kW) + management (~0.5 kW).
+OVERHEAD_KW_PER_RACK = 3.0
 OVERHEAD_U_PER_RACK = 4        # TOR switches, cable management, PDU space
+
+# Server-level overhead beyond the GPUs themselves: dual-CPU, NIC, fans, PSU
+# inefficiency. 12% is a reasonable midpoint for modern Blackwell-class HGX
+# servers (the host platform is genuinely heavy on a B200/B300 baseboard).
+SERVER_OVERHEAD_FRACTION = 0.12
 
 
 @dataclass
@@ -102,6 +114,20 @@ class RackPlan:
     density_warning: str | None = None
 
 
+def _select_pdu_tier(cooling_type: str, tdp_watts: int, power_per_server_kw: float) -> str:
+    """Pick the PDU tier that matches the cooling envelope and density.
+
+    Liquid-cooled: ultra-dense CDU is needed for ≥1200 W per-GPU SKUs
+    (B300, GB300, Vera Rubin); standard direct-to-chip handles B200 / GB200
+    (≤1000 W) comfortably.
+    Air-cooled: high-density (rear-door heat exchanger) when per-server
+    power exceeds ~5 kW; otherwise standard CRAC.
+    """
+    if cooling_type == "liquid":
+        return "ultra_liquid" if tdp_watts >= 1200 else "liquid_cooled"
+    return "high_density_air" if power_per_server_kw > 5.0 else "standard_air"
+
+
 def plan_rack_layout(
     gpu_name: str,
     gpu_count: int,
@@ -111,7 +137,7 @@ def plan_rack_layout(
     max_power_per_rack_kw: float | None = None,
     is_rack_scale: bool = False,
     rack_gpu_count: int | None = None,
-    pue: float = 1.3,
+    pue: float | None = None,
 ) -> RackPlan:
     """Plan the physical rack layout for a GPU deployment.
 
@@ -124,8 +150,13 @@ def plan_rack_layout(
         max_power_per_rack_kw: User constraint on rack power
         is_rack_scale: Whether this is a rack-scale system (NVL72)
         rack_gpu_count: GPUs per rack for rack-scale systems
-        pue: Power Usage Effectiveness multiplier
+        pue: Optional explicit PUE override. If None, derived from
+             cooling_type (PUE_LIQUID for liquid, PUE_AIR otherwise) so the
+             default matches the cost-engine convention.
     """
+    if pue is None:
+        pue = PUE_LIQUID if cooling_type == "liquid" else PUE_AIR
+
     # --- Determine server specs ---
     ff_key = form_factor if form_factor in SERVER_FORM_FACTORS else "SXM"
     if is_rack_scale and rack_gpu_count and rack_gpu_count >= 72:
@@ -138,9 +169,8 @@ def plan_rack_layout(
     gpus_per_server = ff["max_gpus"]
 
     # --- Power per server ---
-    # Server overhead: ~10% for CPU, NIC, fans, PSU inefficiency
     power_per_gpu_kw = tdp_watts / 1000.0
-    server_overhead_kw = gpus_per_server * power_per_gpu_kw * 0.10
+    server_overhead_kw = gpus_per_server * power_per_gpu_kw * SERVER_OVERHEAD_FRACTION
     power_per_server_kw = (gpus_per_server * power_per_gpu_kw) + server_overhead_kw
 
     # --- Servers needed ---
@@ -150,14 +180,11 @@ def plan_rack_layout(
     usable_u = RACK_HEIGHT_U - OVERHEAD_U_PER_RACK
     max_servers_by_u = max(1, usable_u // u_per_server)
 
-    # --- How many servers fit per rack (power limited) ---
-    # Select PDU tier based on cooling type
-    if cooling_type == "liquid":
-        pdu_tier_key = "liquid_cooled"
-    else:
-        pdu_tier_key = "high_density_air" if power_per_server_kw > 5.0 else "standard_air"
-
+    # --- PDU tier selection (cooling-aware, density-aware) ---
+    pdu_tier_key = _select_pdu_tier(cooling_type, tdp_watts, power_per_server_kw)
     pdu = PDU_TIERS[pdu_tier_key]
+
+    # --- How many servers fit per rack (power limited) ---
     pdu_available_kw = pdu["max_kw"] - OVERHEAD_KW_PER_RACK
     max_servers_by_power = max(1, int(pdu_available_kw / power_per_server_kw))
 
@@ -192,8 +219,9 @@ def plan_rack_layout(
     # --- PDU headroom ---
     pdu_headroom_pct = max(0.0, ((pdu["max_kw"] - power_per_rack_kw) / pdu["max_kw"]) * 100)
 
-    # --- Cooling ---
-    cooling_cap = COOLING_CAPACITY.get(cooling_type, 30.0)
+    # --- Cooling capacity is now tier-matched (RDHX for high-density air,
+    # high-flow CDUs for ultra-liquid) rather than a single per-cooling-type number.
+    cooling_cap = pdu["cooling_kw"]
     cooling_headroom_pct = max(0.0, ((cooling_cap - power_per_rack_kw) / cooling_cap) * 100)
     fits_cooling = power_per_rack_kw <= cooling_cap
 
@@ -205,7 +233,7 @@ def plan_rack_layout(
     # --- Density warning ---
     density_warning = None
     if not fits_cooling:
-        density_warning = f"Rack power {power_per_rack_kw:.1f}kW exceeds {cooling_type} cooling capacity ({cooling_cap:.0f}kW)"
+        density_warning = f"Rack power {power_per_rack_kw:.1f}kW exceeds {pdu['label'].lower()} cooling capacity ({cooling_cap:.0f}kW)"
     elif not fits_power:
         density_warning = f"Rack power {power_per_rack_kw:.1f}kW exceeds user limit ({max_power_per_rack_kw:.0f}kW)"
     elif pdu_headroom_pct < 10:

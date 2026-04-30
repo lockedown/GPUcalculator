@@ -141,13 +141,15 @@ class TestConstraints:
             form_factor="SXM",
             cooling_type="air",
         )
-        # 8 × 1200W = 9.6kW + 10% overhead ≈ 10.56kW per server
-        # Multiple servers per rack will exceed air cooling 30kW
-        if plan.power_per_rack_kw > 30.0:
+        # Cooling capacity is now PDU-tier matched (high-density-air = 40 kW).
+        # If the planner managed to fill the rack past that, fits_cooling
+        # should be False and a warning surfaced.
+        if plan.power_per_rack_kw > plan.cooling_capacity_kw:
             assert plan.fits_cooling is False
             assert plan.density_warning is not None
 
     def test_liquid_cooling_high_capacity(self):
+        # B300 at 1200W triggers ultra_liquid tier (per-server > 10 kW).
         plan = plan_rack_layout(
             gpu_name="B300 SXM",
             gpu_count=8,
@@ -155,7 +157,20 @@ class TestConstraints:
             form_factor="SXM",
             cooling_type="liquid",
         )
+        assert plan.cooling_capacity_kw == 132.0
+        assert plan.pdu_tier == "ultra_liquid"
+
+    def test_standard_liquid_capacity(self):
+        # B200 at 1000W stays under the 10 kW threshold and selects standard liquid.
+        plan = plan_rack_layout(
+            gpu_name="B200 SXM",
+            gpu_count=8,
+            tdp_watts=1000,
+            form_factor="SXM",
+            cooling_type="liquid",
+        )
         assert plan.cooling_capacity_kw == 120.0
+        assert plan.pdu_tier == "liquid_cooled"
 
 
 class TestHeadroom:

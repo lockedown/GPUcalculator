@@ -21,15 +21,18 @@ def calc_complexity(
     user_cooling: str = "air",
     precision: str = "FP16",
 ) -> ComplexityResult:
-    """
-    Calculate complexity score. Higher = easier to deploy.
+    """Calculate complexity score. Higher = easier to deploy.
 
-    Base: software stack maturity (1-10 from DB)
-    Penalties applied:
-      - Liquid cooling required but user has air-only: +3
-      - FP8 requested but limited/no support: +2
-      - Multi-vendor networking required: +1
-      - Rack-scale deployment (NVL72): +2
+    Base: software stack maturity (1-10 from the SoftwareStack table)
+    Penalties:
+      - FP8 requested but stack has limited/no support: +1 (partial) or +2 (none)
+      - Rack-scale deployment (NVL72): +2 (specialised facility & ops)
+
+    Cooling mismatches (air site + liquid GPU) are NOT penalised here — they
+    are handled by the optimizer's structured constraint codes
+    (``Violation.COOLING_HARD`` / ``COOLING_SOFT`` / ``DLC_REQUIRED``) so they
+    only apply once. ``user_cooling`` is kept in the signature for backward
+    compatibility but no longer affects the score.
     """
     # Get software stack maturity
     stack = (
@@ -41,19 +44,9 @@ def calc_complexity(
     base_score = stack.maturity_score if stack else 5
 
     penalties = 0.0
-    breakdown = {}
+    breakdown: dict[str, float] = {}
 
-    # Cooling penalty
-    if gpu.cooling_type == "liquid" and user_cooling == "air":
-        if gpu.is_rack_scale:
-            # NVL72 rack-scale GPUs physically require liquid cooling — not optional
-            penalties += 5.0
-            breakdown["cooling_incompatible"] = 5.0
-        else:
-            penalties += 3.0
-            breakdown["cooling_mismatch"] = 3.0
-
-    # FP8 support penalty
+    # FP8 stack-maturity penalty
     if precision == "FP8":
         fp8_level = stack.fp8_support_level if stack else "none"
         if fp8_level == "none":
@@ -63,7 +56,7 @@ def calc_complexity(
             penalties += 1.0
             breakdown["partial_fp8_support"] = 1.0
 
-    # Rack-scale penalty
+    # Rack-scale operational penalty (specialised power/cooling/handling)
     if gpu.is_rack_scale:
         penalties += 2.0
         breakdown["rack_scale_deployment"] = 2.0

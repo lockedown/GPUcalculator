@@ -800,12 +800,13 @@ class TestComplexityEngine:
         amd_cx = calc_complexity(db, amd)
         assert nv_cx.final_score >= amd_cx.final_score
 
-    def test_cooling_penalty_applied(self, db):
+    def test_user_cooling_not_double_penalised(self, db):
+        # Cooling mismatch is the optimizer's responsibility (Violation.COOLING_*).
+        # calc_complexity must not double-count it via user_cooling.
         gpu = db.query(GPU).filter(GPU.name == "GB200 NVL72").first()
-        if gpu.cooling_type == "liquid":
-            cx_air = calc_complexity(db, gpu, user_cooling="air")
-            cx_liq = calc_complexity(db, gpu, user_cooling="liquid")
-            assert cx_air.final_score < cx_liq.final_score
+        cx_air = calc_complexity(db, gpu, user_cooling="air")
+        cx_liq = calc_complexity(db, gpu, user_cooling="liquid")
+        assert cx_air.final_score == cx_liq.final_score
 
     def test_fp8_penalty_for_no_support(self, db):
         gpu = db.query(GPU).filter(GPU.name == "H200 SXM").first()
