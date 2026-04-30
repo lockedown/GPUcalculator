@@ -5,6 +5,7 @@ import { GPU_COLORS } from "@/types";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { InfoTooltip } from "@/components/ui/info-tooltip";
 import { formatCurrency, formatNumber } from "@/lib/utils";
 import {
   Network,
@@ -92,7 +93,12 @@ export default function SweetSpotDetail({ result, loading }: Props) {
         </div>
 
         {/* Topology */}
-        <Section icon={<Network className="h-3.5 w-3.5" />} title="Topology">
+        <Section
+          icon={<Network className="h-3.5 w-3.5" />}
+          title="Topology"
+          tooltip="GPUs sized to fit model + per-replica KV cache, with DP replicas added for throughput. TP rounded up to a power of 2 (NCCL efficiency)."
+          learnMore="topology"
+        >
           <Row label="GPUs required" value={`${totalGpus}×`} />
           <Row label="Strategy" value={t?.parallelism_strategy ?? "—"} />
           <Row
@@ -113,7 +119,12 @@ export default function SweetSpotDetail({ result, loading }: Props) {
 
         {/* Rack plan */}
         {r && (
-          <Section icon={<Server className="h-3.5 w-3.5" />} title="Rack plan">
+          <Section
+            icon={<Server className="h-3.5 w-3.5" />}
+            title="Rack plan"
+            tooltip="42U rack layout with PDU tier picked from cooling type + per-GPU TDP. Cooling envelope is matched to the PDU tier (25/40/120/132 kW)."
+            learnMore="constraints"
+          >
             <Row
               label="Racks"
               value={`${r.total_racks} × ${r.gpus_per_rack}-GPU`}
@@ -136,7 +147,12 @@ export default function SweetSpotDetail({ result, loading }: Props) {
         )}
 
         {/* TCO */}
-        <Section icon={<Banknote className="h-3.5 w-3.5" />} title="36-month TCO">
+        <Section
+          icon={<Banknote className="h-3.5 w-3.5" />}
+          title="36-month TCO"
+          tooltip="CapEx (hardware × USD→GBP 0.74) + OpEx (TDP × cooling-aware PUE × £0.17/kWh × 730 h/mo × 36)."
+          learnMore="tco"
+        >
           <Row
             label="CapEx (hardware + network)"
             value={formatCurrency(result.capex_gbp)}
@@ -157,7 +173,12 @@ export default function SweetSpotDetail({ result, loading }: Props) {
         </Section>
 
         {/* Throughput economics */}
-        <Section icon={<TrendingUp className="h-3.5 w-3.5" />} title="Throughput economics">
+        <Section
+          icon={<TrendingUp className="h-3.5 w-3.5" />}
+          title="Throughput economics"
+          tooltip="Tokens/£/mo divides aggregate decode by amortised monthly cost — a value-per-pound metric that often flips rankings vs raw throughput."
+          learnMore="tco"
+        >
           <Row
             label="Decode (aggregate)"
             value={`${formatNumber(result.decode_tokens_per_sec)} tok/s`}
@@ -220,15 +241,24 @@ function Section({
   icon,
   title,
   children,
+  tooltip,
+  learnMore,
 }: {
   icon: React.ReactNode;
   title: string;
   children: React.ReactNode;
+  tooltip?: React.ReactNode;
+  learnMore?: string;
 }) {
   return (
     <div className="space-y-1">
       <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-widest text-gray-500">
         {icon} {title}
+        {tooltip && (
+          <InfoTooltip learnMore={learnMore} iconClassName="h-2.5 w-2.5">
+            {tooltip}
+          </InfoTooltip>
+        )}
       </div>
       <div className="space-y-0.5">{children}</div>
     </div>

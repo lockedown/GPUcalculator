@@ -4,6 +4,7 @@ import { useStore } from "@/lib/store";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { NumericInput } from "@/components/ui/numeric-input";
 import { Slider } from "@/components/ui/slider";
+import { InfoTooltip } from "@/components/ui/info-tooltip";
 import {
   Select,
   SelectTrigger,
@@ -13,10 +14,30 @@ import {
 } from "@/components/ui/select";
 
 const WEIGHT_KEYS = [
-  { key: "performance", label: "Performance", color: "bg-blue-600" },
-  { key: "cost", label: "Cost", color: "bg-emerald-600" },
-  { key: "complexity", label: "Complexity", color: "bg-violet-600" },
-  { key: "availability", label: "Availability", color: "bg-amber-600" },
+  {
+    key: "performance",
+    label: "Performance",
+    color: "bg-blue-600",
+    tooltip: "Aggregate decode tokens/sec. Higher → favours fast GPUs (B300, GB300 NVL72) regardless of price.",
+  },
+  {
+    key: "cost",
+    label: "Cost",
+    color: "bg-emerald-600",
+    tooltip: "36-month TCO (CapEx + OpEx). Higher → favours cheap GPUs that meet the workload (RTX PRO 6000 BSE, AMD MI series).",
+  },
+  {
+    key: "complexity",
+    label: "Complexity",
+    color: "bg-violet-600",
+    tooltip: "Software-stack maturity. Higher → favours mature CUDA/NVIDIA stacks; penalises ROCm and rack-scale (NVL72) deployments.",
+  },
+  {
+    key: "availability",
+    label: "Availability",
+    color: "bg-amber-600",
+    tooltip: "Lead time + supply status. Higher → favours in-stock GPUs (H100, H200, MI300X) over pre-GA SKUs.",
+  },
 ] as const;
 
 export default function ConstraintSliders() {
@@ -31,7 +52,13 @@ export default function ConstraintSliders() {
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
           {/* Budget */}
           <div className="flex flex-col gap-1.5">
-            <label className="text-[11px] font-medium text-gray-500">Max Budget (£)</label>
+            <label className="flex items-center gap-1 text-[11px] font-medium text-gray-500">
+              Max Budget (£)
+              <InfoTooltip learnMore="constraints">
+                36-month TCO ceiling. GPUs over the limit get a score penalty
+                proportional to how badly they exceed it (capped at 90%).
+              </InfoTooltip>
+            </label>
             <NumericInput
               min={0}
               nullable
@@ -43,7 +70,12 @@ export default function ConstraintSliders() {
 
           {/* Power */}
           <div className="flex flex-col gap-1.5">
-            <label className="text-[11px] font-medium text-gray-500">Max Power/Rack (kW)</label>
+            <label className="flex items-center gap-1 text-[11px] font-medium text-gray-500">
+              Max Power/Rack (kW)
+              <InfoTooltip learnMore="constraints">
+                Per-rack power envelope. GPUs whose rack power exceeds this take a flat 30% score penalty.
+              </InfoTooltip>
+            </label>
             <NumericInput
               min={0}
               nullable
@@ -55,7 +87,13 @@ export default function ConstraintSliders() {
 
           {/* Cooling */}
           <div className="flex flex-col gap-1.5">
-            <label className="text-[11px] font-medium text-gray-500">Cooling Type</label>
+            <label className="flex items-center gap-1 text-[11px] font-medium text-gray-500">
+              Cooling Type
+              <InfoTooltip learnMore="constraints">
+                Air-cooled sites filter out DLC-mandatory GPUs (B300, GB200/GB300 NVL72).
+                Choice also picks the PUE used for OpEx (1.15 liquid / 1.30 air).
+              </InfoTooltip>
+            </label>
             <Select
               value={constraints.cooling_type}
               onValueChange={(v) => setConstraints({ cooling_type: v })}
@@ -72,7 +110,13 @@ export default function ConstraintSliders() {
 
           {/* Lead Time */}
           <div className="flex flex-col gap-1.5">
-            <label className="text-[11px] font-medium text-gray-500">Max Lead Time (wks)</label>
+            <label className="flex items-center gap-1 text-[11px] font-medium text-gray-500">
+              Max Lead Time (wks)
+              <InfoTooltip learnMore="availability">
+                Hard cap on procurement wait. GPUs with lead time over the
+                limit take a flat 30% score penalty.
+              </InfoTooltip>
+            </label>
             <NumericInput
               min={0}
               nullable
@@ -85,14 +129,26 @@ export default function ConstraintSliders() {
 
         {/* Metric Weights */}
         <div className="mt-5">
-          <span className="text-[11px] font-medium text-gray-500">Metric Weights</span>
+          <span className="flex items-center gap-1 text-[11px] font-medium text-gray-500">
+            Metric Weights
+            <InfoTooltip learnMore="weights">
+              Each axis is rank-normalised (0-1) across GPUs and combined as a
+              weighted sum. Push a slider toward 100% to weight the
+              recommendation entirely on that dimension.
+            </InfoTooltip>
+          </span>
           <div className="mt-3 grid grid-cols-2 gap-x-6 gap-y-4 sm:grid-cols-4">
-            {WEIGHT_KEYS.map(({ key, label, color }) => {
+            {WEIGHT_KEYS.map(({ key, label, color, tooltip }) => {
               const value = (constraints.metric_weights as Record<string, number>)[key];
               return (
                 <div key={key} className="flex flex-col gap-2">
                   <div className="flex items-center justify-between">
-                    <span className="text-[10px] font-medium text-gray-500">{label}</span>
+                    <span className="flex items-center gap-1 text-[10px] font-medium text-gray-500">
+                      {label}
+                      <InfoTooltip learnMore="weights" iconClassName="h-2.5 w-2.5">
+                        {tooltip}
+                      </InfoTooltip>
+                    </span>
                     <span className="font-mono text-[10px] text-gray-400">
                       {(value * 100).toFixed(0)}%
                     </span>

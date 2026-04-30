@@ -12,6 +12,7 @@ import { formatCurrency, formatNumber } from "@/lib/utils";
 import { GPU_COLORS } from "@/types";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { InfoTooltip } from "@/components/ui/info-tooltip";
 
 export default function Dashboard() {
   const { comparison, fetchGpus, runComparison, loading, constraints } = useStore();
@@ -67,6 +68,9 @@ export default function Dashboard() {
           <Card className="border-amber-200 bg-gradient-to-br from-amber-50 to-white p-4">
             <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-widest text-amber-600">
               <Trophy className="h-3.5 w-3.5" /> Sweet Spot
+              <InfoTooltip learnMore="weights">
+                Highest composite score that passes all hard constraints. Falls back to top scorer if nothing passes (with violations flagged).
+              </InfoTooltip>
             </div>
             <div className="mt-2 text-lg font-bold" style={{ color: GPU_COLORS[sweetSpot.gpu_name] || "#111" }}>
               {sweetSpot.gpu_name}
@@ -78,6 +82,9 @@ export default function Dashboard() {
           <Card className="border-blue-200 bg-gradient-to-br from-blue-50 to-white p-4">
             <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-widest text-blue-600">
               <Zap className="h-3.5 w-3.5" /> Decode Throughput
+              <InfoTooltip learnMore="performance">
+                Aggregate tokens/sec across all DP replicas. Decode is memory-bandwidth-bound — calibrated against published Llama-3-70B benchmarks.
+              </InfoTooltip>
             </div>
             <div className="mt-2 text-lg font-bold text-gray-900">
               {formatNumber(sweetSpot.decode_tokens_per_sec)} tok/s
@@ -87,6 +94,9 @@ export default function Dashboard() {
           <Card className="border-emerald-200 bg-gradient-to-br from-emerald-50 to-white p-4">
             <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-widest text-emerald-600">
               <Cpu className="h-3.5 w-3.5" /> GPUs Required
+              <InfoTooltip learnMore="topology">
+                Sized to fit model + per-replica KV cache, then scale via DP replicas so each user can hit ≥10 tok/s. TP rounded to power of 2.
+              </InfoTooltip>
             </div>
             <div className="mt-2 text-lg font-bold text-gray-900">
               {sweetSpot.topology?.gpu_count ?? "—"}×
@@ -96,6 +106,9 @@ export default function Dashboard() {
           <Card className="border-violet-200 bg-gradient-to-br from-violet-50 to-white p-4">
             <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-widest text-violet-600">
               <Banknote className="h-3.5 w-3.5" /> 36-month TCO
+              <InfoTooltip learnMore="tco">
+                CapEx (hardware + network, USD→GBP at 0.74) + OpEx (TDP × PUE × 730 h × £0.17/kWh, monthly) over 36 months.
+              </InfoTooltip>
             </div>
             <div className="mt-2 text-lg font-bold text-gray-900">
               {formatCurrency(sweetSpot.tco_gbp)}
