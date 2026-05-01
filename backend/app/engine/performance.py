@@ -96,26 +96,50 @@ def calc_prefill_tokens_per_sec(
     params_b: float,
     precision: str,
     mem_bandwidth_tb_s: float,
+    *,
+    context_length: int | None = None,
+    num_layers: int | None = None,
+    hidden_dim: int | None = None,
 ) -> tuple[float, bool]:
-    """
-    Prefill is compute-bound when arithmetic intensity is high.
-    tokens/sec = FLOPS / (2 * params * bytes_per_param)
-    Also check roofline: compare compute vs memory bandwidth limit.
+    """Prefill throughput estimate (tokens/sec).
+
+    Two-term FLOPs model when ``context_length`` is provided:
+      - 2N forward-pass cost per token (Kaplan/Chinchilla)
+      - O(L) per-token attention cost from the softmax(QK^T)V step,
+        which scales with ``num_layers × hidden_dim × context_length``.
+        At long context (>32K) this term dominates the FFN cost.
+
+    Without context_length / arch, falls back to the 2N-only model — accurate
+    for short prompts, optimistic for long ones.
     """
     bytes_per_param = PRECISION_BYTES.get(precision, 2.0)
-    # Use precision-appropriate TFLOPS (approximate scaling)
     effective_tflops = bf16_tflops
     if precision == "FP8":
         effective_tflops = bf16_tflops * 2.0  # FP8 tensor cores ~2x BF16
     elif precision == "FP4":
         effective_tflops = bf16_tflops * 4.0
 
-    flops_per_token = 2 * params_b * 1e9  # ~2N FLOPs per token (forward pass)
+    # FFN + projections: ~2N FLOPs per token (forward pass)
+    flops_per_token = 2 * params_b * 1e9
+
+    # Attention: per-token cost grows linearly with context length.
+    # Per layer: Q×K^T + Softmax×V each cost L × hidden_dim FLOPs per token.
+    # Total across all layers: ~2 × num_layers × hidden_dim × L per token.
+    if context_length and num_layers and hidden_dim:
+        attention_flops_per_token = 2 * num_layers * hidden_dim * context_length
+        flops_per_token += attention_flops_per_token
+
     compute_limit = (effective_tflops * 1e12) / flops_per_token
 
-    # Memory bandwidth limit for prefill (loading weights once per batch)
+    # Memory bandwidth limit. Weights are streamed once per prompt (not per
+    # token), so the per-token mem cost is (model_bytes / L). Without a
+    # context length, fall back to per-token = model_bytes (decode-like) which
+    # under-estimates prefill but preserves legacy callers' expectations.
     model_bytes = params_b * 1e9 * bytes_per_param
-    mem_limit = (mem_bandwidth_tb_s * 1e12) / model_bytes
+    if context_length:
+        mem_limit = (mem_bandwidth_tb_s * 1e12) * context_length / model_bytes
+    else:
+        mem_limit = (mem_bandwidth_tb_s * 1e12) / model_bytes
 
     is_compute_bound = compute_limit < mem_limit
     tokens_per_sec = min(compute_limit, mem_limit)
@@ -127,14 +151,33 @@ def calc_decode_tokens_per_sec(
     mem_bandwidth_tb_s: float,
     params_b: float,
     precision: str,
+    *,
+    context_length: int | None = None,
+    num_layers: int | None = None,
+    kv_dim: int | None = None,
 ) -> float:
-    """
-    Decode is memory-bandwidth-bound (autoregressive, 1 token at a time per sequence).
-    tokens/sec = mem_bandwidth / (params * bytes_per_param)
+    """Decode throughput estimate (tokens/sec).
+
+    Memory-bandwidth bound: every output token requires streaming the model
+    weights AND reading the full per-sequence KV cache from HBM.
+
+      tok/s = BW / (model_bytes + L × per_token_kv_bytes)
+
+    The KV-read term is small at short context (<5% at 4K for L3-70B) but
+    dominates at long context (>30% at 128K). Without ``context_length``,
+    falls back to model-only — accurate for short context, optimistic above ~32K.
     """
     bytes_per_param = PRECISION_BYTES.get(precision, 2.0)
     model_bytes = params_b * 1e9 * bytes_per_param
-    tokens_per_sec = (mem_bandwidth_tb_s * 1e12) / model_bytes
+
+    bytes_per_token = model_bytes
+    if context_length and num_layers and kv_dim:
+        # Per-token KV-cache bytes: 2 (K+V) × layers × kv_dim × bytes_per_elem.
+        # Total KV streamed per output token: L × per-token-bytes.
+        kv_bytes_per_pos = 2 * num_layers * kv_dim * bytes_per_param
+        bytes_per_token += context_length * kv_bytes_per_pos
+
+    tokens_per_sec = (mem_bandwidth_tb_s * 1e12) / bytes_per_token
     return tokens_per_sec
 
 
@@ -285,12 +328,22 @@ def calculate_performance(
     if precision == "FP4" and not supports_fp4:
         effective_precision = "FP8"
 
-    # TFLOPS scaling for precision is handled inside calc_prefill_tokens_per_sec
+    # TFLOPS scaling for precision is handled inside calc_prefill_tokens_per_sec.
+    # Pass arch + context so the long-context attention (prefill) and KV-read
+    # (decode) terms are included.
+    kv_dim = arch.get("num_kv_heads", arch["num_heads"]) * arch["head_dim"]
     prefill_tps, is_compute_bound = calc_prefill_tokens_per_sec(
-        bf16_tflops * gpu_count, active_params_b, effective_precision, effective_bandwidth_tb_s * gpu_count
+        bf16_tflops * gpu_count, active_params_b, effective_precision,
+        effective_bandwidth_tb_s * gpu_count,
+        context_length=context_length,
+        num_layers=arch["num_layers"],
+        hidden_dim=arch["hidden_dim"],
     )
     decode_tps = calc_decode_tokens_per_sec(
-        effective_bandwidth_tb_s * gpu_count, active_params_b, effective_precision
+        effective_bandwidth_tb_s * gpu_count, active_params_b, effective_precision,
+        context_length=context_length,
+        num_layers=arch["num_layers"],
+        kv_dim=kv_dim,
     )
 
     max_ctx = calc_max_context_tokens(

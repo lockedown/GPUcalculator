@@ -104,19 +104,35 @@ def _gpu_specs() -> dict[str, dict]:
     }
 
 
+# Reference context length for the published Llama3-70B benchmarks the
+# REFERENCE_DECODE / REFERENCE_PREFILL values were measured at. Calibration
+# computes the raw roofline at this same context so the long-context KV-read
+# (decode) and attention (prefill) terms stay consistent with the reference.
+REFERENCE_CONTEXT_LENGTH = 4096
+
+# Llama-3-70B architecture used inside calibration's roofline calls.
+_LLAMA3_70B_ARCH = {"num_layers": 80, "hidden_dim": 8192, "num_kv_heads": 8, "head_dim": 128}
+
+
 def get_decode_factor(gpu_name: str) -> float:
-    """Calibration factor for decode tok/s (Llama3-70B FP16, batch=1)."""
+    """Calibration factor for decode tok/s (Llama3-70B FP16, 4K context, batch=1)."""
     global _decode_factors
     if _decode_factors is None:
         from app.engine.performance import calc_decode_tokens_per_sec
         specs = _gpu_specs()
         _decode_factors = {}
+        kv_dim = _LLAMA3_70B_ARCH["num_kv_heads"] * _LLAMA3_70B_ARCH["head_dim"]
         for name, ref in REFERENCE_DECODE.items():
             s = specs.get(name)
             if s:
                 # For NVL72 rack-scale, reference is per-rack (72 GPUs aggregate)
                 gpu_count = 72 if "NVL72" in name else 1
-                raw = calc_decode_tokens_per_sec(s["mem_bw"] * gpu_count, 70, "FP16")
+                raw = calc_decode_tokens_per_sec(
+                    s["mem_bw"] * gpu_count, 70, "FP16",
+                    context_length=REFERENCE_CONTEXT_LENGTH,
+                    num_layers=_LLAMA3_70B_ARCH["num_layers"],
+                    kv_dim=kv_dim,
+                )
                 _decode_factors[name] = ref / raw if raw > 0 else 1.0
             else:
                 _decode_factors[name] = 1.0
@@ -124,7 +140,7 @@ def get_decode_factor(gpu_name: str) -> float:
 
 
 def get_prefill_factor(gpu_name: str) -> float:
-    """Calibration factor for prefill tok/s (Llama3-70B FP16)."""
+    """Calibration factor for prefill tok/s (Llama3-70B FP16, 4K context)."""
     global _prefill_factors
     if _prefill_factors is None:
         from app.engine.performance import calc_prefill_tokens_per_sec
@@ -135,7 +151,10 @@ def get_prefill_factor(gpu_name: str) -> float:
             if s:
                 gpu_count = 72 if "NVL72" in name else 1
                 raw, _ = calc_prefill_tokens_per_sec(
-                    s["bf16"] * gpu_count, 70, "FP16", s["mem_bw"] * gpu_count
+                    s["bf16"] * gpu_count, 70, "FP16", s["mem_bw"] * gpu_count,
+                    context_length=REFERENCE_CONTEXT_LENGTH,
+                    num_layers=_LLAMA3_70B_ARCH["num_layers"],
+                    hidden_dim=_LLAMA3_70B_ARCH["hidden_dim"],
                 )
                 _prefill_factors[name] = ref / raw if raw > 0 else 1.0
             else:

@@ -98,6 +98,63 @@ class TestPrefillTokensPerSec:
         tps_8, _ = calc_prefill_tokens_per_sec(989, 70, "FP8", 4.8)
         assert tps_8 > tps_16
 
+    def test_long_context_attention_term_slows_prefill(self):
+        # With L³-70B arch (80 layers, 8192 hidden), 128K context adds
+        # significant per-token attention FLOPs (~2.2× the 2N base).
+        tps_short, _ = calc_prefill_tokens_per_sec(
+            989, 70, "FP16", 4.8,
+            context_length=4096, num_layers=80, hidden_dim=8192,
+        )
+        tps_long, _ = calc_prefill_tokens_per_sec(
+            989, 70, "FP16", 4.8,
+            context_length=131072, num_layers=80, hidden_dim=8192,
+        )
+        # Long-context prefill should be at least 30% slower than short
+        assert tps_long < tps_short * 0.7
+
+    def test_context_aware_prefill_far_above_legacy(self):
+        # The legacy mem_limit treated prefill like decode (per-token weight
+        # streaming) so it was always memory-bound for big models on H-class
+        # GPUs (~34 tok/s). The fixed formula amortises weight streaming over
+        # the prompt length, freeing the calc to be compute-bound (~6-7K tok/s).
+        # Same workload, very different answer — the legacy answer was wrong.
+        tps_legacy, _ = calc_prefill_tokens_per_sec(989, 70, "FP16", 4.8)
+        tps_aware, compute_bound = calc_prefill_tokens_per_sec(
+            989, 70, "FP16", 4.8,
+            context_length=4096, num_layers=80, hidden_dim=8192,
+        )
+        assert tps_aware > 50 * tps_legacy
+        assert compute_bound is True
+
+
+class TestLongContextDecode:
+    """Decode tok/s should drop noticeably at long context due to KV reads."""
+
+    def test_kv_read_term_slows_decode_at_128k(self):
+        # H200 70B FP16: 4K context KV is ~1% of model; 128K is ~30%.
+        tps_short = calc_decode_tokens_per_sec(
+            4.8, 70, "FP16",
+            context_length=4096, num_layers=80, kv_dim=8 * 128,
+        )
+        tps_long = calc_decode_tokens_per_sec(
+            4.8, 70, "FP16",
+            context_length=131072, num_layers=80, kv_dim=8 * 128,
+        )
+        # 128K decode should be 20-35% slower than 4K
+        ratio = tps_long / tps_short
+        assert 0.65 < ratio < 0.85
+
+    def test_no_context_falls_back_to_model_only(self):
+        # Without context_length, behaves exactly like the legacy formula.
+        legacy = calc_decode_tokens_per_sec(4.8, 70, "FP16")
+        with_short = calc_decode_tokens_per_sec(
+            4.8, 70, "FP16",
+            context_length=4096, num_layers=80, kv_dim=8 * 128,
+        )
+        # 4K should be within ~1.5% of legacy (KV is tiny)
+        assert with_short == pytest.approx(legacy, rel=0.02)
+        assert with_short < legacy  # but slightly slower
+
 
 class TestMaxContextTokens:
     def test_h200_70b_fp16(self):

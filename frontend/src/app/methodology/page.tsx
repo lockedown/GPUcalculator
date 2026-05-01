@@ -124,9 +124,9 @@ export default function MethodologyPage() {
             weights through the GPU per token — memory-bandwidth-bound.
           </p>
           <Defs items={[
-            { term: "Decode (per GPU)", def: "BW ÷ (model_size × bytes_per_param). H200 (4.8 TB/s) on 70B FP16 ≈ 34 raw tok/s; on FP8 the same GPU doubles to ~69 because halving the precision halves the bytes-per-param." },
-            { term: "Prefill (per GPU)", def: "min(compute_limit, mem_limit) where compute_limit = effective_TFLOPS ÷ (2N FLOPs/token)." },
-            { term: "Calibration", def: "The naive roofline misses kernel optimisations, attention fusion, and tensor-core utilisation. The engine applies a per-GPU multiplier so its prediction matches published Llama-3-70B benchmarks within ±15%." },
+            { term: "Decode (per GPU)", def: "BW ÷ (model_bytes + L × per-token-KV-bytes). At short context (4K) the KV term is ~1% of model so decode is essentially BW ÷ model_bytes. At 128K context the KV-read term is ~30% of model and decode slows accordingly." },
+            { term: "Prefill (per GPU)", def: "min(compute_limit, mem_limit). compute_limit = effective_TFLOPS ÷ (2N + 2 × num_layers × hidden_dim × L) — the 2N is FFN/projections, the second term is attention O(L). mem_limit = BW × L ÷ model_bytes — weights stream once per prompt and amortise over L tokens, so prefill is essentially never memory-bound at any reasonable context length." },
+            { term: "Calibration", def: "The naive roofline misses kernel optimisations, attention fusion, and tensor-core utilisation. The engine applies a per-GPU multiplier so its prediction matches published Llama-3-70B benchmarks at the 4K reference context within ±15%." },
             { term: "FP8 / FP4 handling", def: "The bytes-per-param + TFLOPS multiplier already encode the precision speed-up. Calibration applies only a residual down-correction for hardware with weak FP8 (e.g. AMD MI300X gets 0.5×)." },
             { term: "Aggregate throughput", def: "Per-replica throughput × number of DP replicas." },
           ]} />
@@ -312,14 +312,17 @@ export default function MethodologyPage() {
         <Section id="caveats" title="Caveats & known limits">
           <ul className="list-disc pl-5 space-y-2">
             <li>
-              <strong>Long-context decode</strong> ignores the cost of streaming
-              the KV cache itself — accurate for &lt;32K context, slightly
-              optimistic above.
+              <strong>Decode KV-read</strong> term assumes the full KV cache
+              is read each token (matches a non-quantised KV at FP16/BF16).
+              Real systems often use FP8 KV (halves the cost) or paged
+              attention with eviction (further reduces it for partial-context
+              decodes).
             </li>
             <li>
-              <strong>Prefill compute model</strong> uses the standard 2N FLOPs
-              per token; the O(L²) attention cost is omitted, so very long
-              prompts may be over-predicted.
+              <strong>Prefill attention</strong> term uses 2 × num_layers
+              × hidden_dim × L per token (correct for full standard attention).
+              FlashAttention-3 / sliding-window / sparse attention variants
+              run cheaper than this — predictions are conservative for those.
             </li>
             <li>
               <strong>OpEx still omits</strong> bandwidth / network egress
