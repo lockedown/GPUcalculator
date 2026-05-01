@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Cpu, Grid3X3, LayoutDashboard, Menu, TrendingDown, BookOpen, Pin } from "lucide-react";
+import { Cpu, Grid3X3, LayoutDashboard, Menu, TrendingDown, BookOpen, Pin, Code2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -16,6 +16,7 @@ const NAV_ITEMS = [
   { href: "/benchmarks", label: "Benchmarks", icon: Grid3X3 },
   { href: "/prices", label: "Prices", icon: TrendingDown },
   { href: "/methodology", label: "Methodology", icon: BookOpen },
+  { href: "/api", label: "API", icon: Code2 },
 ];
 
 export default function Navbar() {
