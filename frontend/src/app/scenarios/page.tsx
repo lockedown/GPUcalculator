@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
-import { Trash2, Link as LinkIcon, Check, Pin } from "lucide-react";
+import { Trash2, Link as LinkIcon, Check, Pin, Printer } from "lucide-react";
 import {
   loadPinned,
   unpinScenario,
@@ -117,19 +117,28 @@ export default function ScenariosPage() {
           </p>
         </div>
         {rows.length > 0 && (
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleCopyComparisonLink}
-            className="shrink-0"
-            title="Copy a URL that imports all current pins into the recipient's browser"
-          >
-            {copied ? (
-              <><Check className="h-3.5 w-3.5" /> Copied</>
-            ) : (
-              <><LinkIcon className="h-3.5 w-3.5" /> Copy comparison link</>
-            )}
-          </Button>
+          <div className="flex shrink-0 items-center gap-2 print-hide">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleCopyComparisonLink}
+              title="Copy a URL that imports all current pins into the recipient's browser"
+            >
+              {copied ? (
+                <><Check className="h-3.5 w-3.5" /> Copied</>
+              ) : (
+                <><LinkIcon className="h-3.5 w-3.5" /> Copy comparison link</>
+              )}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => typeof window !== "undefined" && window.print()}
+              title="Print or save the side-by-side comparison as PDF"
+            >
+              <Printer className="h-3.5 w-3.5" /> Print / PDF
+            </Button>
+          </div>
         )}
       </div>
 
@@ -146,7 +155,7 @@ export default function ScenariosPage() {
         </Card>
       ) : (
         <div
-          className="grid gap-4"
+          className="grid gap-4 print-scenarios-grid"
           style={{ gridTemplateColumns: `repeat(${rows.length}, minmax(0, 1fr))` }}
         >
           {rows.map((row) => (

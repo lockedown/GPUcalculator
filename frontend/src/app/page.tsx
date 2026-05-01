@@ -8,10 +8,10 @@ import ConstraintSliders from "@/components/forms/ConstraintSliders";
 import BubbleScatter from "@/components/charts/BubbleScatter";
 import SweetSpotDetail from "@/components/charts/SweetSpotDetail";
 import ComparisonTable from "@/components/charts/ComparisonTable";
-import { Trophy, Cpu, Zap, Banknote, Link as LinkIcon, Check, Pin } from "lucide-react";
+import { Trophy, Cpu, Zap, Banknote, Link as LinkIcon, Check, Pin, Printer } from "lucide-react";
 import { formatCurrency, formatNumber } from "@/lib/utils";
 import { GPU_COLORS } from "@/types";
-import { Card } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { InfoTooltip } from "@/components/ui/info-tooltip";
 import { Button } from "@/components/ui/button";
@@ -21,7 +21,7 @@ import { pinScenario, MAX_PINNED } from "@/lib/scenarios";
 import Link from "next/link";
 
 export default function Dashboard() {
-  const { comparison, fetchGpus, runComparison, loading, constraints } = useStore();
+  const { comparison, fetchGpus, runComparison, loading, constraints, workload } = useStore();
   useUrlSync(); // Two-way sync between URL ?params and store state
   const [copied, setCopied] = useState(false);
 
@@ -87,7 +87,7 @@ export default function Dashboard() {
             Dynamic infrastructure sizing across NVIDIA Hopper/Blackwell and AMD Instinct — find the sweet spot for your workload.
           </p>
         </div>
-        <div className="flex shrink-0 items-center gap-2">
+        <div className="flex shrink-0 items-center gap-2 print-hide">
           <Button
             variant="outline"
             size="sm"
@@ -110,6 +110,14 @@ export default function Dashboard() {
             ) : (
               <><LinkIcon className="h-3.5 w-3.5" /> Copy share link</>
             )}
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => typeof window !== "undefined" && window.print()}
+            title="Print or save the current sweet-spot report as PDF"
+          >
+            <Printer className="h-3.5 w-3.5" /> Print / PDF
           </Button>
         </div>
       </div>
@@ -182,18 +190,59 @@ export default function Dashboard() {
         </div>
       ) : null}
 
-      {/* Config */}
-      <WorkloadForm />
-      <ConstraintSliders />
-
-      {/* Visualisations: BubbleScatter + SweetSpotDetail panel */}
-      <div className="grid gap-5 xl:grid-cols-[1fr_400px]">
-        <BubbleScatter results={results} width={780} height={460} />
-        <SweetSpotDetail result={sweetSpot} loading={loading && !sweetSpot} />
+      {/* Config — interactive form, hidden in print */}
+      <div className="print-hide">
+        <WorkloadForm />
+        <ConstraintSliders />
       </div>
 
-      {/* Table */}
+      {/* Print-only: condensed snapshot of the inputs since the form is hidden */}
+      <Card className="print-only print-break-avoid">
+        <CardContent className="p-4 text-[11px]">
+          <div className="mb-2 text-[10px] font-semibold uppercase tracking-widest text-gray-500">
+            Configuration snapshot
+          </div>
+          <div className="grid grid-cols-3 gap-x-6 gap-y-1">
+            <div><span className="text-gray-500">Model:</span> <strong>{workload.model_params_b}B</strong></div>
+            <div><span className="text-gray-500">Precision:</span> <strong>{workload.precision}</strong></div>
+            <div><span className="text-gray-500">Context:</span> <strong>{(workload.context_length / 1024).toFixed(0)}K</strong></div>
+            <div><span className="text-gray-500">Concurrent users:</span> <strong>{workload.concurrent_users}</strong></div>
+            <div><span className="text-gray-500">Workload:</span> <strong>{workload.workload_type}</strong></div>
+            <div><span className="text-gray-500">Cooling:</span> <strong>{constraints.cooling_type}</strong></div>
+            <div><span className="text-gray-500">Amortisation:</span> <strong>{constraints.amortization_months / 12} years</strong></div>
+            <div><span className="text-gray-500">Max budget:</span> <strong>{constraints.max_budget_usd ? formatCurrency(constraints.max_budget_usd) : "—"}</strong></div>
+            <div><span className="text-gray-500">Max lead time:</span> <strong>{constraints.max_lead_time_weeks ? `${constraints.max_lead_time_weeks} wk` : "—"}</strong></div>
+            <div><span className="text-gray-500">Colo $/kW/mo:</span> <strong>${constraints.colo_usd_per_kw_per_month}</strong></div>
+            <div><span className="text-gray-500">HW support %/yr:</span> <strong>{(constraints.hw_support_pct_of_capex_per_year * 100).toFixed(0)}%</strong></div>
+            <div><span className="text-gray-500">Software $/GPU/yr:</span> <strong>${constraints.software_usd_per_gpu_per_year}</strong></div>
+            <div className="col-span-3 mt-1">
+              <span className="text-gray-500">Weights:</span>{" "}
+              perf {(constraints.metric_weights.performance * 100).toFixed(0)}% ·
+              cost {(constraints.metric_weights.cost * 100).toFixed(0)}% ·
+              complexity {(constraints.metric_weights.complexity * 100).toFixed(0)}% ·
+              availability {(constraints.metric_weights.availability * 100).toFixed(0)}%
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Visualisations — BubbleScatter is screen-only; SweetSpotDetail prints */}
+      <div className="grid gap-5 xl:grid-cols-[1fr_400px]">
+        <div className="print-hide">
+          <BubbleScatter results={results} width={780} height={460} />
+        </div>
+        <div className="print-break-avoid">
+          <SweetSpotDetail result={sweetSpot} loading={loading && !sweetSpot} />
+        </div>
+      </div>
+
+      {/* Table — included in print */}
       <ComparisonTable results={results} sweetSpot={sweetSpotName} loading={loading && results.length === 0} />
+
+      {/* Print-only footer */}
+      <div className="print-only mt-4 text-[9px] text-gray-500">
+        Generated by gpu-calc.vercel.app · Methodology: gpu-calc.vercel.app/methodology
+      </div>
     </div>
   );
 }

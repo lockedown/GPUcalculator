@@ -18,3 +18,97 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* ------------------------------------------------------------------ */
+/* Print / "Save as PDF" rules                                        */
+/* ------------------------------------------------------------------ */
+/* Anything tagged .print-hide vanishes from paper output. The opposite
+   class .print-only is hidden on screen and shown in print, used for
+   condensed summary blocks that replace interactive widgets. */
+
+.print-only {
+  display: none !important;
+}
+
+@media print {
+  /* Page setup */
+  @page {
+    size: A4 portrait;
+    margin: 12mm 12mm 14mm 12mm;
+  }
+
+  /* Force light theme + remove backgrounds for ink economy */
+  html,
+  body {
+    background: #ffffff !important;
+    color: #111 !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* Hide screen-only chrome */
+  .print-hide,
+  header,
+  nav,
+  button:not(.print-show),
+  [role="tooltip"],
+  [data-radix-popper-content-wrapper] {
+    display: none !important;
+  }
+
+  /* Reveal print-only blocks (condensed input snapshots, etc.) */
+  .print-only {
+    display: block !important;
+  }
+
+  /* Page-break helpers */
+  .print-break-before {
+    break-before: page;
+  }
+  .print-break-avoid {
+    break-inside: avoid;
+  }
+
+  /* Tighter typography on paper */
+  main {
+    padding: 0 !important;
+    max-width: none !important;
+  }
+  h1 {
+    font-size: 16pt !important;
+  }
+  .text-xl {
+    font-size: 14pt !important;
+  }
+
+  /* Cards: drop shadows + heavy backgrounds for cleaner print */
+  [class*="shadow"] {
+    box-shadow: none !important;
+  }
+  [class*="bg-gradient"] {
+    background: #ffffff !important;
+  }
+
+  /* Tables: borders for legibility */
+  table {
+    border-collapse: collapse !important;
+  }
+  table th,
+  table td {
+    border: 0.5pt solid #ccc !important;
+  }
+
+  /* Avoid orphaned cards mid-page */
+  [class*="Card"],
+  .rounded-lg,
+  .rounded-xl {
+    break-inside: avoid;
+  }
+
+  /* /scenarios: a 3- or 4-column comparison grid is too narrow for A4
+     portrait. Force a 2-column layout so each card has ~90mm of width. */
+  .print-scenarios-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 8mm !important;
+  }
+}
