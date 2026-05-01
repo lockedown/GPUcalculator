@@ -27,6 +27,20 @@ class ConstraintInput(BaseModel):
         48,
         description="GPU CapEx amortisation period in months (36, 48, or 60). Default 48 = 4yr (industry middle ground; AWS uses 60, hyperscalers up to 72).",
     )
+    # Run-cost OpEx components (USD). Default to typical US enterprise values;
+    # set any to 0.0 to opt out of that line.
+    colo_usd_per_kw_per_month: float = Field(
+        200.0,
+        description="Colocation rent per IT-kW per month, USD. CBRE H2 2025: ~$195. Set 0 if self-operated.",
+    )
+    hw_support_pct_of_capex_per_year: float = Field(
+        0.10,
+        description="Hardware support contract as fraction of CapEx per year. Typical 8-15% for AI hardware.",
+    )
+    software_usd_per_gpu_per_year: float = Field(
+        1000.0,
+        description="Software licensing per GPU per year, USD (e.g. NVIDIA AI Enterprise list ~$1000/GPU/yr).",
+    )
     metric_weights: dict[str, float] = Field(
         default={"performance": 0.35, "cost": 0.30, "complexity": 0.15, "availability": 0.20},
         description="Weights for each metric (should sum to 1.0)",
@@ -79,6 +93,9 @@ class GPUResult(BaseModel):
     tco_usd: float | None = None
     capex_usd: float | None = None
     opex_monthly_usd: float | None = None
+    # Itemised monthly OpEx: keys are power_usd, colocation_usd,
+    # hw_support_usd, software_usd. None when calc skipped.
+    opex_breakdown: dict[str, float] | None = None
     tokens_per_usd: float | None = None
     complexity_score: float | None = None
     availability_score: float | None = None

@@ -151,6 +151,63 @@ export default function ConstraintSliders() {
           </div>
         </div>
 
+        {/* Run Costs (OpEx components) */}
+        <div className="mt-5">
+          <span className="flex items-center gap-1 text-[11px] font-medium text-gray-500">
+            Run Costs
+            <InfoTooltip learnMore="tco">
+              Operating-cost components included in the monthly OpEx line.
+              Set any to 0 to opt out (e.g. self-operated DC: zero out colo).
+              Defaults reflect 2026 US enterprise typical.
+            </InfoTooltip>
+          </span>
+          <div className="mt-3 grid grid-cols-2 gap-4 md:grid-cols-3">
+            <div className="flex flex-col gap-1.5">
+              <label className="flex items-center gap-1 text-[10px] font-medium text-gray-500">
+                Colocation ($/IT-kW/mo)
+                <InfoTooltip learnMore="tco" iconClassName="h-2.5 w-2.5">
+                  Rent for rack space, cooling, UPS, fire suppression. CBRE H2-2025 reports ~$195/kW-mo for 250–500 kW deployments in US DC markets. Charged on IT-kW reserved (separate from metered power).
+                </InfoTooltip>
+              </label>
+              <NumericInput
+                min={0}
+                fallback={200}
+                value={constraints.colo_usd_per_kw_per_month}
+                onChange={(v) => setConstraints({ colo_usd_per_kw_per_month: v ?? 0 })}
+              />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <label className="flex items-center gap-1 text-[10px] font-medium text-gray-500">
+                HW Support (% of CapEx/yr)
+                <InfoTooltip learnMore="tco" iconClassName="h-2.5 w-2.5">
+                  Hardware support contract (Dell ProSupport, NVIDIA Mission Control, NBD on-site replacement). Typical 8–15% of CapEx per year for AI hardware.
+                </InfoTooltip>
+              </label>
+              <NumericInput
+                min={0}
+                max={100}
+                fallback={10}
+                value={constraints.hw_support_pct_of_capex_per_year * 100}
+                onChange={(v) => setConstraints({ hw_support_pct_of_capex_per_year: (v ?? 0) / 100 })}
+              />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <label className="flex items-center gap-1 text-[10px] font-medium text-gray-500">
+                Software ($/GPU/yr)
+                <InfoTooltip learnMore="tco" iconClassName="h-2.5 w-2.5">
+                  Software licensing per GPU per year. NVIDIA AI Enterprise list ~$1,000/GPU/yr (5-yr term included free with H100/H200).
+                </InfoTooltip>
+              </label>
+              <NumericInput
+                min={0}
+                fallback={1000}
+                value={constraints.software_usd_per_gpu_per_year}
+                onChange={(v) => setConstraints({ software_usd_per_gpu_per_year: v ?? 0 })}
+              />
+            </div>
+          </div>
+        </div>
+
         {/* Metric Weights */}
         <div className="mt-5">
           <span className="flex items-center gap-1 text-[11px] font-medium text-gray-500">

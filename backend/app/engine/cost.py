@@ -20,11 +20,28 @@ DEFAULT_HOURS_PER_MONTH = 730  # 8760 / 12
 # 48mo is the middle ground for an enterprise persona. UI exposes 36/48/60.
 DEFAULT_AMORTIZATION_MONTHS = 48
 
+# --- Run-cost defaults (USD) ---
+# Colocation / facility rent. CBRE H2 2025 reports ~$195/kW-month for
+# 250-500 kW deployments in major US DC markets. Charged on IT-kW reserved;
+# *separate* from the metered electricity above (the kWh charge covers actual
+# energy drawn including PUE losses, the colo fee covers space/cooling/UPS).
+DEFAULT_COLO_USD_PER_KW_PER_MONTH = 200.0
+
+# Hardware support / maintenance contract (Dell ProSupport, NVIDIA Mission
+# Control, etc.) — typical 8-15% of CapEx per year for AI hardware. Use 10%.
+DEFAULT_HW_SUPPORT_PCT_OF_CAPEX_PER_YEAR = 0.10
+
+# Software licensing — NVIDIA AI Enterprise published list ~$1,000/GPU/yr
+# (5-year term included free with H100/H200; charged separately for others).
+DEFAULT_SOFTWARE_USD_PER_GPU_PER_YEAR = 1000.0
+
 
 @dataclass
 class CostResult:
     capex_usd: float
     opex_monthly_usd: float
+    # Itemised monthly OpEx so the UI can render a transparent breakdown.
+    opex_breakdown: dict
     tco_36m_usd: float
     tokens_per_usd_per_month: float
     power_kw: float
@@ -41,13 +58,25 @@ def calc_tco(
     cost_per_kwh_usd: float = DEFAULT_COST_PER_KWH_USD,
     amortization_months: int = DEFAULT_AMORTIZATION_MONTHS,
     cooling_type: str | None = None,
+    colo_usd_per_kw_per_month: float = DEFAULT_COLO_USD_PER_KW_PER_MONTH,
+    hw_support_pct_of_capex_per_year: float = DEFAULT_HW_SUPPORT_PCT_OF_CAPEX_PER_YEAR,
+    software_usd_per_gpu_per_year: float = DEFAULT_SOFTWARE_USD_PER_GPU_PER_YEAR,
 ) -> CostResult:
-    """
-    Calculate Total Cost of Ownership in USD.
+    """Calculate Total Cost of Ownership in USD.
 
     CapEx = (gpu_price × gpu_count) + network_switch_cost + storage_cost
-    OpEx_monthly = (total_tdp_kw × PUE × hours_per_month × cost_per_kwh)
+
+    OpEx (monthly) = power + colocation + hardware support + software
+        power     = total_tdp_kw × PUE × hours_per_month × cost_per_kwh
+        colo      = total_tdp_kw × colo_usd_per_kw_per_month   (IT-kW reserved)
+        support   = capex × hw_support_pct_of_capex_per_year / 12
+        software  = gpu_count × software_usd_per_gpu_per_year / 12
+
     TCO = CapEx + (OpEx_monthly × amortization_months)
+
+    To zero out any of the four OpEx lines, pass ``0.0`` for the matching
+    parameter (e.g. ``colo_usd_per_kw_per_month=0.0`` for self-operated DCs
+    where the rent is already capitalised elsewhere).
 
     PUE selection: explicit ``pue`` wins; else derived from ``cooling_type``
     ("liquid" → 1.15, "air" → 1.40); else falls back to DEFAULT_PUE.
@@ -58,7 +87,7 @@ def calc_tco(
 
     capex_usd = (gpu_price_usd * gpu_count) + network_switch_cost_usd + storage_cost_usd
 
-    # OpEx (power)
+    # OpEx — power
     if tdp_watts is None:
         tdp_watts = 1000  # 2026 default — Blackwell-class
 
@@ -72,12 +101,34 @@ def calc_tco(
 
     total_power_kw = (tdp_watts * gpu_count) / 1000.0
     effective_power_kw = total_power_kw * pue
-    opex_monthly = effective_power_kw * DEFAULT_HOURS_PER_MONTH * cost_per_kwh_usd
+    power_opex_monthly = effective_power_kw * DEFAULT_HOURS_PER_MONTH * cost_per_kwh_usd
+
+    # OpEx — colocation (charged on IT-kW reserved, *not* PUE-adjusted —
+    # the kWh charge above covers the PUE losses; this covers space/UPS/cooling).
+    colo_opex_monthly = total_power_kw * colo_usd_per_kw_per_month
+
+    # OpEx — hardware support contract (% of CapEx per year, monthly slice)
+    support_opex_monthly = capex_usd * hw_support_pct_of_capex_per_year / 12.0
+
+    # OpEx — software licensing (per GPU per year, monthly slice)
+    software_opex_monthly = gpu_count * software_usd_per_gpu_per_year / 12.0
+
+    opex_monthly = (
+        power_opex_monthly + colo_opex_monthly + support_opex_monthly + software_opex_monthly
+    )
+
+    opex_breakdown = {
+        "power_usd": round(power_opex_monthly, 2),
+        "colocation_usd": round(colo_opex_monthly, 2),
+        "hw_support_usd": round(support_opex_monthly, 2),
+        "software_usd": round(software_opex_monthly, 2),
+    }
 
     # TCO
     tco = capex_usd + (opex_monthly * amortization_months)
 
-    # Tokens per dollar (per month)
+    # Tokens per dollar (per month). Note: monthly_cost includes the new OpEx
+    # lines, so tokens/$ is meaningfully lower than before — that's the point.
     tokens_per_month = tokens_per_sec * 3600 * 24 * 30  # Assume continuous operation
     monthly_cost = tco / amortization_months
     tokens_per_usd = tokens_per_month / monthly_cost if monthly_cost > 0 else 0
@@ -85,6 +136,7 @@ def calc_tco(
     return CostResult(
         capex_usd=capex_usd,
         opex_monthly_usd=opex_monthly,
+        opex_breakdown=opex_breakdown,
         tco_36m_usd=tco,
         tokens_per_usd_per_month=tokens_per_usd,
         power_kw=total_power_kw,

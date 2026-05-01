@@ -155,23 +155,41 @@ export default function MethodologyPage() {
             <li>+ optional storage cost</li>
           </ul>
           <h3 className="text-sm font-semibold text-gray-900 mt-3">OpEx (monthly)</h3>
+          <p>OpEx is the sum of four components, each editable in the dashboard's <em>Run Costs</em> panel and itemised in the Sweet Spot Detail breakdown:</p>
+          <ul className="list-disc pl-5 space-y-1.5">
+            <li>
+              <strong>Power</strong> — <code className="bg-gray-100 px-1 rounded text-[11px]">total_TDP_kW × PUE × 730 h × $0.10/kWh</code>.
+              The $0.10/kWh default targets a US enterprise self-operated
+              cluster — sits above wholesale (NoVA / Phoenix / Dallas average
+              $0.057–$0.068/kWh) and below colocation retail (~$0.27/kWh).
+              EIA national industrial average is ~$0.085/kWh.
+            </li>
+            <li>
+              <strong>Colocation</strong> — <code className="bg-gray-100 px-1 rounded text-[11px]">total_TDP_kW × $200/kW/month</code>.
+              Rent for the rack space, cooling distribution, UPS, fire
+              suppression. CBRE H2-2025 reports ~$195/kW-month for 250–500 kW
+              deployments in major US DC markets. Charged on IT-kW reserved
+              (separate from the metered electricity above). Set to 0 if
+              you're self-operated and the rent is already capitalised.
+            </li>
+            <li>
+              <strong>Hardware support</strong> — <code className="bg-gray-100 px-1 rounded text-[11px]">CapEx × 10% / 12</code>.
+              Support contract (Dell ProSupport, NVIDIA Mission Control,
+              NBD on-site replacement). Typical 8–15% of CapEx per year for
+              AI hardware.
+            </li>
+            <li>
+              <strong>Software</strong> — <code className="bg-gray-100 px-1 rounded text-[11px]">gpu_count × $1000/yr / 12</code>.
+              Software licensing per GPU per year. NVIDIA AI Enterprise list is
+              ~$1,000/GPU/yr (5-yr term included free with H100/H200).
+            </li>
+          </ul>
           <p>
-            <code className="bg-gray-100 px-1 rounded text-[11px]">
-              total_TDP_kW × PUE × 730 hours × $0.10/kWh
-            </code>
-          </p>
-          <p>
-            The default <strong>$0.10/kWh</strong> targets a US enterprise
-            self-operated cluster — sits above wholesale (NoVA / Phoenix /
-            Dallas average $0.057–$0.068/kWh) and PPAs ($0.056–$0.066/kWh)
-            but below colocation retail (~$0.27/kWh including facility
-            overhead). EIA national industrial average is ~$0.085/kWh.
-          </p>
-          <p>
-            <strong>PUE</strong> (Power Usage Effectiveness) accounts for
-            facility overhead beyond the GPUs themselves — cooling, UPS losses,
-            networking, lighting. The engine picks 1.15 for liquid-cooled pods
-            and 1.30 for air-cooled enterprise sites.
+            <strong>PUE</strong> (Power Usage Effectiveness) sits inside the
+            power line and accounts for facility overhead beyond the GPUs
+            themselves — cooling, UPS losses, networking, lighting. The engine
+            picks 1.15 for liquid-cooled pods and 1.40 for air-cooled
+            enterprise sites.
           </p>
           <h3 className="text-sm font-semibold text-gray-900 mt-3">Total</h3>
           <p>
@@ -304,11 +322,12 @@ export default function MethodologyPage() {
               prompts may be over-predicted.
             </li>
             <li>
-              <strong>OpEx omits</strong> colocation rental (~$200/kW/month
-              typical for major US DC markets), hardware maintenance contracts
-              (~10% of CapEx/year), and software licensing (e.g. NVIDIA AI
-              Enterprise ~$1k/GPU/year). Add roughly $5–10k/GPU/year for a
-              hosted enterprise cluster.
+              <strong>OpEx still omits</strong> bandwidth / network egress
+              (highly variable; typically &lt;$500/GPU/yr for training, much higher
+              for inference serving public traffic), MLOps / sysadmin headcount
+              (~1 FTE per 500-1000 GPUs at $120-180k loaded), insurance
+              (~0.3-0.5% of asset value/yr), and discretionary tooling like
+              Run.AI / Weights & Biases / observability stack ($200-1k/GPU/yr).
             </li>
             <li>
               <strong>Pre-GA SKUs</strong> (B300, GB300, MI350X, MI355X) use

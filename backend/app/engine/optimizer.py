@@ -447,6 +447,9 @@ def evaluate_gpu(
         network_switch_cost_usd=network_cost,
         cooling_type=gpu.cooling_type,
         amortization_months=constraints.amortization_months,
+        colo_usd_per_kw_per_month=constraints.colo_usd_per_kw_per_month,
+        hw_support_pct_of_capex_per_year=constraints.hw_support_pct_of_capex_per_year,
+        software_usd_per_gpu_per_year=constraints.software_usd_per_gpu_per_year,
     )
 
     # --- Complexity ---
@@ -553,6 +556,7 @@ def evaluate_gpu(
         tco_usd=cost.tco_36m_usd,
         capex_usd=cost.capex_usd,
         opex_monthly_usd=cost.opex_monthly_usd,
+        opex_breakdown=cost.opex_breakdown,
         tokens_per_usd=cost.tokens_per_usd_per_month,
         complexity_score=complexity.final_score,
         availability_score=avail.score,

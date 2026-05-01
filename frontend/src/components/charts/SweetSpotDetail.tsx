@@ -152,17 +152,52 @@ export default function SweetSpotDetail({ result, loading }: Props) {
         <Section
           icon={<Banknote className="h-3.5 w-3.5" />}
           title={`${amortMonths / 12}-Year TCO`}
-          tooltip={`CapEx (hardware + network) + OpEx (TDP × cooling-aware PUE × $0.10/kWh × 730 h/mo × ${amortMonths}). All figures in USD.`}
+          tooltip={`CapEx (hardware + network) + OpEx (power, colocation, support, software) over ${amortMonths} months. All figures in USD.`}
           learnMore="tco"
         >
           <Row
             label="CapEx (hardware + network)"
             value={formatCurrency(result.capex_usd)}
           />
-          <Row
-            label="OpEx / month (power × PUE)"
-            value={formatCurrency(monthlyOpex)}
-          />
+          {result.opex_breakdown ? (
+            <>
+              <Row
+                label="↳ Power / month"
+                value={formatCurrency(result.opex_breakdown.power_usd)}
+                valueClass="text-gray-600"
+              />
+              {result.opex_breakdown.colocation_usd > 0 && (
+                <Row
+                  label="↳ Colocation / month"
+                  value={formatCurrency(result.opex_breakdown.colocation_usd)}
+                  valueClass="text-gray-600"
+                />
+              )}
+              {result.opex_breakdown.hw_support_usd > 0 && (
+                <Row
+                  label="↳ HW support / month"
+                  value={formatCurrency(result.opex_breakdown.hw_support_usd)}
+                  valueClass="text-gray-600"
+                />
+              )}
+              {result.opex_breakdown.software_usd > 0 && (
+                <Row
+                  label="↳ Software / month"
+                  value={formatCurrency(result.opex_breakdown.software_usd)}
+                  valueClass="text-gray-600"
+                />
+              )}
+              <Row
+                label="OpEx total / month"
+                value={formatCurrency(monthlyOpex)}
+              />
+            </>
+          ) : (
+            <Row
+              label="OpEx / month"
+              value={formatCurrency(monthlyOpex)}
+            />
+          )}
           <Row
             label="Amortised cost / month"
             value={formatCurrency(monthlyAmortised)}

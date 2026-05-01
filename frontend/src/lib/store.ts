@@ -63,6 +63,9 @@ const DEFAULT_CONSTRAINTS: ConstraintInput = {
   cooling_type: "air",
   max_lead_time_weeks: null,
   amortization_months: 48,
+  colo_usd_per_kw_per_month: 200,
+  hw_support_pct_of_capex_per_year: 0.10,
+  software_usd_per_gpu_per_year: 1000,
   metric_weights: {
     performance: 0.35,
     cost: 0.3,

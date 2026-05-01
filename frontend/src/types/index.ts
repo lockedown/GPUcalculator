@@ -86,6 +86,10 @@ export interface ConstraintInput {
   cooling_type: string;
   max_lead_time_weeks: number | null;
   amortization_months: number;  // 36 | 48 | 60
+  // Run-cost OpEx components — set any to 0 to opt out of that line.
+  colo_usd_per_kw_per_month: number;
+  hw_support_pct_of_capex_per_year: number;
+  software_usd_per_gpu_per_year: number;
   metric_weights: {
     performance: number;
     cost: number;
@@ -140,6 +144,13 @@ export interface GPUResult {
   tco_usd: number | null;
   capex_usd: number | null;
   opex_monthly_usd: number | null;
+  // Itemised monthly OpEx components in USD.
+  opex_breakdown: {
+    power_usd: number;
+    colocation_usd: number;
+    hw_support_usd: number;
+    software_usd: number;
+  } | null;
   tokens_per_usd: number | null;
   complexity_score: number | null;
   availability_score: number | null;
