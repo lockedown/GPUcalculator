@@ -105,9 +105,9 @@ export default function Dashboard() {
           </Card>
           <Card className="border-violet-200 bg-gradient-to-br from-violet-50 to-white p-4">
             <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-widest text-violet-600">
-              <Banknote className="h-3.5 w-3.5" /> 36-month TCO
+              <Banknote className="h-3.5 w-3.5" /> {constraints.amortization_months / 12}-Year TCO
               <InfoTooltip learnMore="tco">
-                CapEx (hardware + network) + OpEx (TDP × PUE × 730 h × $0.10/kWh, monthly) over 36 months. All figures in USD.
+                CapEx (hardware + network) + OpEx (TDP × PUE × 730 h × $0.10/kWh, monthly) over the chosen amortisation period ({constraints.amortization_months} months). All figures in USD.
               </InfoTooltip>
             </div>
             <div className="mt-2 text-lg font-bold text-gray-900">

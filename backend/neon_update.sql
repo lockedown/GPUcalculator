@@ -79,8 +79,8 @@ DELETE FROM gpus;
 -- bf16_tflops / fp8_tflops / fp4_tflops aligned with HTML source + seed.py
 INSERT INTO gpus (name, vendor, generation, form_factor, hbm_capacity_gb, hbm_type, mem_bandwidth_tb_s, memory_gb, memory_type, memory_bandwidth_tbps, bf16_tflops, fp64_tflops, fp8_tflops, fp4_tflops, supports_fp4, tdp_watts, cooling_type, intra_node_interconnect, interconnect_bw_gb_s, interconnect_type, cooling_requirement, supported_workloads, max_gpus_per_node, is_rack_scale, rack_gpu_count, rack_fabric_bw_tb_s, msrp_usd, is_estimated, release_date, created_at, updated_at) VALUES
 -- NVIDIA Hopper
-('H100 SXM5', 'NVIDIA', 'Hopper', 'SXM5', 80, 'HBM3', 3.35, 80, 'HBM3', 3.35, 1750, NULL, 3960, NULL, false, 700, 'air', 'NVLink 4', 900, 'NVLink 4', 'Any', '["inference", "training", "fine-tuning"]'::jsonb, 8, false, NULL, NULL, 30000, false, '2024-Q1', NOW(), NOW()),
-('H200 SXM', 'NVIDIA', 'Hopper', 'SXM', 141, 'HBM3e', 4.8, 141, 'HBM3e', 4.8, 1970, NULL, 3960, NULL, false, 700, 'air', 'NVLink 4', 900, 'NVLink 4', 'Any', '["inference", "training", "fine-tuning"]'::jsonb, 8, false, NULL, NULL, 30000, false, '2024-Q1', NOW(), NOW()),
+('H100 SXM5', 'NVIDIA', 'Hopper', 'SXM5', 80, 'HBM3', 3.35, 80, 'HBM3', 3.35, 989, NULL, 3960, NULL, false, 700, 'air', 'NVLink 4', 900, 'NVLink 4', 'Any', '["inference", "training", "fine-tuning"]'::jsonb, 8, false, NULL, NULL, 30000, false, '2024-Q1', NOW(), NOW()),
+('H200 SXM', 'NVIDIA', 'Hopper', 'SXM', 141, 'HBM3e', 4.8, 141, 'HBM3e', 4.8, 989, NULL, 3960, NULL, false, 700, 'air', 'NVLink 4', 900, 'NVLink 4', 'Any', '["inference", "training", "fine-tuning"]'::jsonb, 8, false, NULL, NULL, 30000, false, '2024-Q1', NOW(), NOW()),
 -- NVIDIA Blackwell
 ('B200 HGX', 'NVIDIA', 'Blackwell', 'HGX', 192, 'HBM3e', 8.0, 192, 'HBM3e', 8.0, 2250, NULL, 4500, 19000, true, 1000, 'air', 'NVLink 5', 1800, 'NVLink 5', 'Any', '["inference", "training", "fine-tuning"]'::jsonb, 8, false, NULL, NULL, 40000, false, '2025-Q1', NOW(), NOW()),
 -- NVIDIA Blackwell Ultra
@@ -111,19 +111,48 @@ SELECT id, lead_time_weeks, supply_status FROM (VALUES
 ) AS t(name, lead_time_weeks, supply_status)
 JOIN gpus ON gpus.name = t.name;
 
--- Insert price history data (all GPUs, latest market price)
+-- Insert price history (multi-point trajectory; latest entry should match
+-- gpus.msrp_usd above). Per-GPU equivalent for NVL72 SKUs (rack ÷ 72).
 INSERT INTO price_history (gpu_id, date, price_usd, source)
 SELECT id, t.date::date, price_usd, source FROM (VALUES
-('H100 SXM5', '2025-04-01', 22000, 'market'),
-('H200 SXM', '2025-04-01', 25000, 'market'),
-('B200 HGX', '2025-04-01', 40000, 'market'),
-('B300 HGX', '2025-04-01', 50000, 'estimate'),
-('GB200 NVL72', '2025-04-01', 1950000, 'market'),
-('GB300 NVL72', '2025-04-01', 2500000, 'estimate'),
+('H100 SXM5', '2024-01-01', 28000, 'msrp'),
+('H100 SXM5', '2024-07-01', 25000, 'market'),
+('H100 SXM5', '2025-01-01', 23000, 'market'),
+('H100 SXM5', '2025-07-01', 27000, 'market'),
+('H100 SXM5', '2026-04-01', 30000, 'market'),
+('H200 SXM', '2024-01-01', 32000, 'msrp'),
+('H200 SXM', '2024-07-01', 30000, 'market'),
+('H200 SXM', '2025-01-01', 28000, 'market'),
+('H200 SXM', '2025-07-01', 29000, 'market'),
+('H200 SXM', '2026-04-01', 30000, 'market'),
+('B200 HGX', '2024-10-01', 42000, 'msrp'),
+('B200 HGX', '2025-04-01', 41000, 'market'),
+('B200 HGX', '2025-10-01', 40000, 'market'),
+('B200 HGX', '2026-04-01', 40000, 'market'),
+('B300 HGX', '2025-10-01', 52000, 'estimate'),
+('B300 HGX', '2026-01-01', 50000, 'msrp'),
+('B300 HGX', '2026-04-01', 50000, 'market'),
+('GB200 NVL72', '2024-10-01', 50000, 'msrp'),
+('GB200 NVL72', '2025-04-01', 47000, 'market'),
+('GB200 NVL72', '2025-10-01', 46000, 'market'),
+('GB200 NVL72', '2026-04-01', 45000, 'market'),
+('GB300 NVL72', '2025-10-01', 80000, 'estimate'),
+('GB300 NVL72', '2026-01-01', 75000, 'msrp'),
+('GB300 NVL72', '2026-04-01', 75000, 'market'),
+('RTX PRO 6000 BSE', '2025-01-01', 9000, 'msrp'),
 ('RTX PRO 6000 BSE', '2025-04-01', 8500, 'market'),
-('MI300X', '2025-04-01', 10000, 'market'),
-('MI350X', '2025-04-01', 18000, 'estimate'),
-('MI355X', '2025-04-01', 22000, 'estimate')
+('RTX PRO 6000 BSE', '2026-04-01', 8500, 'market'),
+('MI300X', '2024-01-01', 15000, 'msrp'),
+('MI300X', '2024-07-01', 13500, 'market'),
+('MI300X', '2025-01-01', 11000, 'market'),
+('MI300X', '2025-07-01', 22000, 'market'),
+('MI300X', '2026-04-01', 22000, 'market'),
+('MI350X', '2025-07-01', 28000, 'estimate'),
+('MI350X', '2025-10-01', 28000, 'msrp'),
+('MI350X', '2026-04-01', 28000, 'market'),
+('MI355X', '2025-10-01', 28000, 'estimate'),
+('MI355X', '2026-01-01', 26000, 'msrp'),
+('MI355X', '2026-04-01', 26000, 'market')
 ) AS t(name, date, price_usd, source)
 JOIN gpus ON gpus.name = t.name;
 

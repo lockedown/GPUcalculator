@@ -446,6 +446,7 @@ def evaluate_gpu(
         tokens_per_sec=effective_decode,
         network_switch_cost_usd=network_cost,
         cooling_type=gpu.cooling_type,
+        amortization_months=constraints.amortization_months,
     )
 
     # --- Complexity ---

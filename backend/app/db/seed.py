@@ -456,61 +456,69 @@ def seed_price_history(db: Session, gpu_map: dict[str, GPU]):
     """Seed historical GPU pricing data (quarterly estimates)."""
     from datetime import date
 
-    # Historical pricing: (date, price_usd, source)
-    # Prices reflect launch MSRP → market adjustments over time
+    # Historical pricing: (date, price_usd, source).
+    # Prices reflect launch MSRP → market adjustments over time. Most recent
+    # entries should match the current GPU_EXTRA_DATA `msrp_usd` value.
     PRICE_DATA: dict[str, list[tuple[str, float, str]]] = {
         "H100 SXM5": [
             ("2024-01-01", 28000, "msrp"),
-            ("2024-04-01", 26000, "market"),
             ("2024-07-01", 25000, "market"),
-            ("2024-10-01", 24000, "market"),
             ("2025-01-01", 23000, "market"),
-            ("2025-04-01", 22000, "market"),
+            ("2025-07-01", 27000, "market"),     # tightening 2025 supply
+            ("2026-04-01", 30000, "market"),     # 2026 channel reality
         ],
         "H200 SXM": [
             ("2024-01-01", 32000, "msrp"),
-            ("2024-04-01", 30000, "market"),
-            ("2024-07-01", 29000, "market"),
-            ("2024-10-01", 28000, "market"),
-            ("2025-01-01", 27000, "market"),
-            ("2025-04-01", 25000, "market"),
+            ("2024-07-01", 30000, "market"),
+            ("2025-01-01", 28000, "market"),
+            ("2025-07-01", 29000, "market"),
+            ("2026-04-01", 30000, "market"),
         ],
         "B200 HGX": [
             ("2024-10-01", 42000, "msrp"),
-            ("2025-01-01", 41000, "market"),
-            ("2025-04-01", 40000, "market"),
+            ("2025-04-01", 41000, "market"),
+            ("2025-10-01", 40000, "market"),
+            ("2026-04-01", 40000, "market"),
         ],
         "B300 HGX": [
-            ("2025-01-01", 50000, "estimate"),
-            ("2025-04-01", 50000, "estimate"),
+            ("2025-10-01", 52000, "estimate"),
+            ("2026-01-01", 50000, "msrp"),
+            ("2026-04-01", 50000, "market"),
         ],
         "GB200 NVL72": [
-            ("2024-10-01", 2100000, "msrp"),
-            ("2025-01-01", 2000000, "market"),
-            ("2025-04-01", 1950000, "market"),
+            # Per-GPU equivalent of full NVL72 rack pricing (rack ÷ 72)
+            ("2024-10-01", 50000, "msrp"),       # ~$3.6M rack at launch
+            ("2025-04-01", 47000, "market"),
+            ("2025-10-01", 46000, "market"),
+            ("2026-04-01", 45000, "market"),     # ~$3.24M rack
         ],
         "GB300 NVL72": [
-            ("2025-01-01", 2500000, "estimate"),
-            ("2025-04-01", 2500000, "estimate"),
+            # Per-GPU equivalent of $5.4–6.5M rack pricing
+            ("2025-10-01", 80000, "estimate"),
+            ("2026-01-01", 75000, "msrp"),       # ~$5.4M rack at launch
+            ("2026-04-01", 75000, "market"),
         ],
         "RTX PRO 6000 BSE": [
             ("2025-01-01", 9000, "msrp"),
             ("2025-04-01", 8500, "market"),
+            ("2026-04-01", 8500, "market"),
         ],
         "MI300X": [
             ("2024-01-01", 15000, "msrp"),
-            ("2024-04-01", 14500, "market"),
             ("2024-07-01", 13500, "market"),
-            ("2024-10-01", 12500, "market"),
             ("2025-01-01", 11000, "market"),
-            ("2025-04-01", 10000, "market"),
+            ("2025-07-01", 22000, "market"),     # AMD price hike (UBS)
+            ("2026-04-01", 22000, "market"),
         ],
         "MI350X": [
-            ("2025-01-01", 18000, "estimate"),
-            ("2025-04-01", 18000, "estimate"),
+            ("2025-07-01", 28000, "estimate"),
+            ("2025-10-01", 28000, "msrp"),
+            ("2026-04-01", 28000, "market"),
         ],
         "MI355X": [
-            ("2025-04-01", 22000, "estimate"),
+            ("2025-10-01", 28000, "estimate"),
+            ("2026-01-01", 26000, "msrp"),
+            ("2026-04-01", 26000, "market"),
         ],
     }
 

@@ -46,7 +46,7 @@ export default function MethodologyPage() {
           <h1 className="text-2xl font-bold tracking-tight text-gray-900">Methodology</h1>
           <p className="mt-2 text-sm text-gray-600">
             How the optimizer turns your workload and constraints into a GPU
-            recommendation, a topology, a 36-month TCO, and a sweet-spot pick.
+            recommendation, a topology, an amortised TCO, and a sweet-spot pick.
             All formulas live in <code className="text-[11px] bg-gray-100 px-1 py-0.5 rounded">backend/app/engine/</code>;
             this page summarises the behaviour without burying you in source.
           </p>
@@ -135,9 +135,18 @@ export default function MethodologyPage() {
         {/* TCO */}
         <Section id="tco" title="TCO (CapEx + OpEx)">
           <p>
-            Total Cost of Ownership over 36 months, in US dollars. All prices
-            in the catalogue (GPU MSRPs, network fabric, electricity) are
-            denominated in USD; no FX conversion is applied.
+            Total Cost of Ownership over the configured <strong>amortisation
+            period</strong> (3 / 4 / 5 years; default 4), in US dollars. All
+            prices in the catalogue (GPU MSRPs, network fabric, electricity)
+            are denominated in USD; no FX conversion is applied.
+          </p>
+          <p>
+            <strong>Amortisation choice matters.</strong> Hyperscalers have
+            been extending GPU useful life as the AI hardware cycle slows:
+            AWS uses 5yr, Meta 5.5yr, Google/Oracle 6yr. We default to 4yr as
+            an enterprise middle ground, but bump to 5yr if your finance team
+            uses a longer depreciation schedule — the per-month amortised
+            cost drops proportionally.
           </p>
           <h3 className="text-sm font-semibold text-gray-900 mt-3">CapEx</h3>
           <ul className="list-disc pl-5 space-y-1">
@@ -167,7 +176,7 @@ export default function MethodologyPage() {
           <h3 className="text-sm font-semibold text-gray-900 mt-3">Total</h3>
           <p>
             <code className="bg-gray-100 px-1 rounded text-[11px]">
-              TCO = CapEx + (OpEx_monthly × 36)
+              TCO = CapEx + (OpEx_monthly × amortisation_months)
             </code>
           </p>
           <p>

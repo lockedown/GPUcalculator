@@ -85,6 +85,7 @@ export interface ConstraintInput {
   max_power_per_rack_kw: number | null;
   cooling_type: string;
   max_lead_time_weeks: number | null;
+  amortization_months: number;  // 36 | 48 | 60
   metric_weights: {
     performance: number;
     cost: number;

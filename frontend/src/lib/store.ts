@@ -62,6 +62,7 @@ const DEFAULT_CONSTRAINTS: ConstraintInput = {
   max_power_per_rack_kw: null,
   cooling_type: "air",
   max_lead_time_weeks: null,
+  amortization_months: 48,
   metric_weights: {
     performance: 0.35,
     cost: 0.3,

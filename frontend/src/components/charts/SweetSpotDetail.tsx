@@ -2,6 +2,7 @@
 
 import type { GPUResult } from "@/types";
 import { GPU_COLORS } from "@/types";
+import { useStore } from "@/lib/store";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -30,6 +31,7 @@ const CODE_LABELS: Record<string, { label: string; tone: "warn" | "info" }> = {
 };
 
 export default function SweetSpotDetail({ result, loading }: Props) {
+  const amortMonths = useStore((s) => s.constraints.amortization_months);
   if (loading) {
     return (
       <Card>
@@ -63,7 +65,7 @@ export default function SweetSpotDetail({ result, loading }: Props) {
   const r = result.rack_plan;
   const totalGpus = t?.gpu_count ?? 0;
   const monthlyOpex = result.opex_monthly_usd ?? 0;
-  const monthlyAmortised = (result.tco_usd ?? 0) / 36;
+  const monthlyAmortised = (result.tco_usd ?? 0) / amortMonths;
   const monthlyCapexShare = Math.max(0, monthlyAmortised - monthlyOpex);
 
   const advisoryCodes = result.violation_codes.filter((c) => c in CODE_LABELS);
@@ -149,8 +151,8 @@ export default function SweetSpotDetail({ result, loading }: Props) {
         {/* TCO */}
         <Section
           icon={<Banknote className="h-3.5 w-3.5" />}
-          title="36-month TCO"
-          tooltip="CapEx (hardware + network) + OpEx (TDP × cooling-aware PUE × $0.10/kWh × 730 h/mo × 36). All figures in USD."
+          title={`${amortMonths / 12}-Year TCO`}
+          tooltip={`CapEx (hardware + network) + OpEx (TDP × cooling-aware PUE × $0.10/kWh × 730 h/mo × ${amortMonths}). All figures in USD.`}
           learnMore="tco"
         >
           <Row
@@ -166,7 +168,7 @@ export default function SweetSpotDetail({ result, loading }: Props) {
             value={formatCurrency(monthlyAmortised)}
           />
           <Row
-            label="Total 36-mo TCO"
+            label={`Total ${amortMonths}-mo TCO`}
             value={formatCurrency(result.tco_usd)}
             valueClass="font-semibold text-gray-900"
           />

@@ -19,10 +19,14 @@ class WorkloadInput(BaseModel):
 
 
 class ConstraintInput(BaseModel):
-    max_budget_usd: float | None = Field(None, description="Maximum 36-month TCO budget in USD")
+    max_budget_usd: float | None = Field(None, description="Maximum amortised TCO budget in USD")
     max_power_per_rack_kw: float | None = Field(None, description="Max power per rack in kW")
     cooling_type: str = Field("air", description="air or liquid")
     max_lead_time_weeks: int | None = Field(None, description="Max acceptable lead time in weeks")
+    amortization_months: int = Field(
+        48,
+        description="GPU CapEx amortisation period in months (36, 48, or 60). Default 48 = 4yr (industry middle ground; AWS uses 60, hyperscalers up to 72).",
+    )
     metric_weights: dict[str, float] = Field(
         default={"performance": 0.35, "cost": 0.30, "complexity": 0.15, "availability": 0.20},
         description="Weights for each metric (should sum to 1.0)",

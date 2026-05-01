@@ -49,13 +49,13 @@ export default function ConstraintSliders() {
         <CardTitle>Constraints & Weights</CardTitle>
       </CardHeader>
       <CardContent>
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
           {/* Budget */}
           <div className="flex flex-col gap-1.5">
             <label className="flex items-center gap-1 text-[11px] font-medium text-gray-500">
               Max Budget ($)
               <InfoTooltip learnMore="constraints">
-                36-month TCO ceiling. GPUs over the limit get a score penalty
+                Amortised TCO ceiling. GPUs over the limit get a score penalty
                 proportional to how badly they exceed it (capped at 90%).
               </InfoTooltip>
             </label>
@@ -124,6 +124,30 @@ export default function ConstraintSliders() {
               value={constraints.max_lead_time_weeks}
               onChange={(v) => setConstraints({ max_lead_time_weeks: v })}
             />
+          </div>
+
+          {/* Amortisation */}
+          <div className="flex flex-col gap-1.5">
+            <label className="flex items-center gap-1 text-[11px] font-medium text-gray-500">
+              Amortisation (yrs)
+              <InfoTooltip learnMore="tco">
+                CapEx amortised over this period. Default 4yr. AWS uses 5yr,
+                hyperscalers up to 6yr — longer = lower amortised cost / month.
+              </InfoTooltip>
+            </label>
+            <Select
+              value={String(constraints.amortization_months)}
+              onValueChange={(v) => setConstraints({ amortization_months: +v })}
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="36">3 years (36 mo)</SelectItem>
+                <SelectItem value="48">4 years (48 mo)</SelectItem>
+                <SelectItem value="60">5 years (60 mo)</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
         </div>
 

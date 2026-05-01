@@ -10,13 +10,30 @@ PRECISION_BYTES = {
     "FP32": 4.0,
 }
 
-# Approximate model architecture params for common LLMs
+# Architecture shapes for representative production LLMs, keyed by total
+# parameter count in billions. ``get_model_arch`` matches by closest key.
+# Keys correspond to real shipping models:
+#   7   — Llama-3-8B / Mistral-7B class (GQA, 8 KV heads)
+#   13  — Llama-2-13B (MHA, 40 KV heads — older architecture, kept for legacy sizing)
+#   22  — Mixtral-8x22B *active* params (MoE backbone shape used for KV)
+#   24  — Mistral-Small-3 / Mistral-Small-3.1 (24B dense)
+#   27  — Gemma-2-27B (16 KV heads)
+#   32  — Qwen2.5-32B (replaces synthetic 34B)
+#   70  — Llama-3.1-70B / Qwen2.5-72B (8 KV heads, GQA)
+#   405 — Llama-3.1-405B (8 KV heads, GQA)
+#   671 — DeepSeek-V3 *total* params (MoE; KV uses MLA — 128 KV heads is an
+#         approximation since MLA's compressed-rank cache doesn't fit this schema)
+#   1500— Hypothetical frontier-scale model
 MODEL_ARCHITECTURES = {
     7: {"num_layers": 32, "hidden_dim": 4096, "num_heads": 32, "num_kv_heads": 8, "head_dim": 128},
-    13: {"num_layers": 40, "hidden_dim": 5120, "num_heads": 40, "num_kv_heads": 8, "head_dim": 128},
-    34: {"num_layers": 48, "hidden_dim": 8192, "num_heads": 64, "num_kv_heads": 8, "head_dim": 128},
+    13: {"num_layers": 40, "hidden_dim": 5120, "num_heads": 40, "num_kv_heads": 40, "head_dim": 128},  # Llama-2-13B (MHA)
+    22: {"num_layers": 56, "hidden_dim": 6144, "num_heads": 48, "num_kv_heads": 8, "head_dim": 128},   # Mixtral-8x22B active
+    24: {"num_layers": 40, "hidden_dim": 5120, "num_heads": 32, "num_kv_heads": 8, "head_dim": 128},   # Mistral-Small-3
+    27: {"num_layers": 46, "hidden_dim": 4608, "num_heads": 32, "num_kv_heads": 16, "head_dim": 128},  # Gemma-2-27B
+    32: {"num_layers": 64, "hidden_dim": 5120, "num_heads": 40, "num_kv_heads": 8, "head_dim": 128},   # Qwen2.5-32B
     70: {"num_layers": 80, "hidden_dim": 8192, "num_heads": 64, "num_kv_heads": 8, "head_dim": 128},
     405: {"num_layers": 126, "hidden_dim": 16384, "num_heads": 128, "num_kv_heads": 8, "head_dim": 128},
+    671: {"num_layers": 61, "hidden_dim": 7168, "num_heads": 128, "num_kv_heads": 128, "head_dim": 128},  # DeepSeek-V3 (MLA approx)
     1500: {"num_layers": 160, "hidden_dim": 24576, "num_heads": 192, "num_kv_heads": 24, "head_dim": 128},
 }
 

@@ -16,7 +16,9 @@ DEFAULT_PUE = PUE_AIR
 # cluster (slightly above wholesale to capture transmission + small overhead).
 DEFAULT_COST_PER_KWH_USD = 0.10
 DEFAULT_HOURS_PER_MONTH = 730  # 8760 / 12
-DEFAULT_AMORTIZATION_MONTHS = 36
+# Default amortisation. AWS uses 5yr (60mo), Meta 5.5yr, Google/Oracle 6yr —
+# 48mo is the middle ground for an enterprise persona. UI exposes 36/48/60.
+DEFAULT_AMORTIZATION_MONTHS = 48
 
 
 @dataclass
