@@ -336,28 +336,11 @@ FROM (VALUES
 ) AS t(gpu_name, benchmark_name, workload_category, workload_description, rating, bar_pct, metric_value, metric_numeric, metric_unit)
 JOIN gpus g ON g.name = t.gpu_name;
 
--- =====================================================
--- Additional price history data (Q1–Q3 2025 trend)
--- =====================================================
-INSERT INTO price_history (gpu_id, date, price_usd, source)
-SELECT id, t.date::date, price_usd, source FROM (VALUES
-('H100 SXM5', '2025-01-01', 30000, 'market'),
-('H100 SXM5', '2025-02-01', 23500, 'market'),
-('H100 SXM5', '2025-03-01', 22500, 'market'),
-('H200 SXM', '2025-01-01', 30000, 'msrp'),
-('H200 SXM', '2025-02-01', 28000, 'market'),
-('H200 SXM', '2025-03-01', 26000, 'market'),
-('B200 HGX', '2025-01-01', 40000, 'msrp'),
-('B200 HGX', '2025-02-01', 40000, 'msrp'),
-('B200 HGX', '2025-03-01', 40000, 'msrp'),
-('RTX PRO 6000 BSE', '2025-01-01', 8500, 'msrp'),
-('RTX PRO 6000 BSE', '2025-02-01', 8500, 'msrp'),
-('RTX PRO 6000 BSE', '2025-03-01', 8500, 'market'),
-('MI300X', '2025-01-01', 15000, 'market'),
-('MI300X', '2025-02-01', 12000, 'market'),
-('MI300X', '2025-03-01', 10500, 'market')
-) AS t(name, date, price_usd, source)
-JOIN gpus ON gpus.name = t.name;
+-- (The legacy "Q1–Q3 2025 trend" supplemental price_history block was
+-- removed when the main price_history block above was extended to a
+-- comprehensive multi-point trajectory through 2026-04-01. Duplicate
+-- entries at overlapping dates were causing /prices charts to render
+-- two points per timestamp.)
 
 -- =====================================================
 -- Verification queries
