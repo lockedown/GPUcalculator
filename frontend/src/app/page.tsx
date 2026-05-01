@@ -8,7 +8,7 @@ import ConstraintSliders from "@/components/forms/ConstraintSliders";
 import BubbleScatter from "@/components/charts/BubbleScatter";
 import SweetSpotDetail from "@/components/charts/SweetSpotDetail";
 import ComparisonTable from "@/components/charts/ComparisonTable";
-import { Trophy, Cpu, Zap, Banknote, Link as LinkIcon, Check } from "lucide-react";
+import { Trophy, Cpu, Zap, Banknote, Link as LinkIcon, Check, Pin } from "lucide-react";
 import { formatCurrency, formatNumber } from "@/lib/utils";
 import { GPU_COLORS } from "@/types";
 import { Card } from "@/components/ui/card";
@@ -17,6 +17,8 @@ import { InfoTooltip } from "@/components/ui/info-tooltip";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { useState } from "react";
+import { pinScenario, MAX_PINNED } from "@/lib/scenarios";
+import Link from "next/link";
 
 export default function Dashboard() {
   const { comparison, fetchGpus, runComparison, loading, constraints } = useStore();
@@ -40,6 +42,19 @@ export default function Dashboard() {
     } catch {
       toast.error("Couldn't copy — your browser blocked clipboard access.");
     }
+  }
+
+  function pinCurrentScenario() {
+    const { workload, constraints } = useStore.getState();
+    const result = pinScenario(workload, constraints);
+    if (result === null) {
+      toast.error(`Pin limit reached (${MAX_PINNED}). Remove one from /scenarios first.`);
+      return;
+    }
+    toast.success("Scenario pinned", {
+      description: `${result.length} of ${MAX_PINNED} pinned. Compare them on /scenarios.`,
+      action: { label: "View", onClick: () => { window.location.href = "/scenarios"; } },
+    });
   }
 
   const results = comparison?.results ?? [];
@@ -72,19 +87,31 @@ export default function Dashboard() {
             Dynamic infrastructure sizing across NVIDIA Hopper/Blackwell and AMD Instinct — find the sweet spot for your workload.
           </p>
         </div>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={copyShareLink}
-          className="shrink-0"
-          title="Copy a link that reproduces this exact workload + constraints + weights"
-        >
-          {copied ? (
-            <><Check className="h-3.5 w-3.5" /> Copied</>
-          ) : (
-            <><LinkIcon className="h-3.5 w-3.5" /> Copy share link</>
-          )}
-        </Button>
+        <div className="flex shrink-0 items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={pinCurrentScenario}
+            title={`Pin this configuration to compare side-by-side on /scenarios (max ${MAX_PINNED})`}
+          >
+            <Pin className="h-3.5 w-3.5" /> Pin scenario
+          </Button>
+          <Button asChild variant="ghost" size="sm" title="View pinned scenarios side-by-side">
+            <Link href="/scenarios">Compare pins</Link>
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={copyShareLink}
+            title="Copy a link that reproduces this exact workload + constraints + weights"
+          >
+            {copied ? (
+              <><Check className="h-3.5 w-3.5" /> Copied</>
+            ) : (
+              <><LinkIcon className="h-3.5 w-3.5" /> Copy share link</>
+            )}
+          </Button>
+        </div>
       </div>
 
       {/* Summary cards */}
