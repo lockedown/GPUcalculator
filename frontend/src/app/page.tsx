@@ -2,25 +2,45 @@
 
 import { useEffect } from "react";
 import { useStore } from "@/lib/store";
+import { useUrlSync } from "@/lib/use-url-sync";
 import WorkloadForm from "@/components/forms/WorkloadForm";
 import ConstraintSliders from "@/components/forms/ConstraintSliders";
 import BubbleScatter from "@/components/charts/BubbleScatter";
 import SweetSpotDetail from "@/components/charts/SweetSpotDetail";
 import ComparisonTable from "@/components/charts/ComparisonTable";
-import { Trophy, Cpu, Zap, Banknote } from "lucide-react";
+import { Trophy, Cpu, Zap, Banknote, Link as LinkIcon, Check } from "lucide-react";
 import { formatCurrency, formatNumber } from "@/lib/utils";
 import { GPU_COLORS } from "@/types";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { InfoTooltip } from "@/components/ui/info-tooltip";
+import { Button } from "@/components/ui/button";
+import { toast } from "sonner";
+import { useState } from "react";
 
 export default function Dashboard() {
   const { comparison, fetchGpus, runComparison, loading, constraints } = useStore();
+  useUrlSync(); // Two-way sync between URL ?params and store state
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     fetchGpus();
     runComparison();
   }, []);
+
+  async function copyShareLink() {
+    if (typeof window === "undefined") return;
+    try {
+      await navigator.clipboard.writeText(window.location.href);
+      setCopied(true);
+      toast.success("Link copied", {
+        description: "Anyone with this URL will see your exact configuration.",
+      });
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      toast.error("Couldn't copy — your browser blocked clipboard access.");
+    }
+  }
 
   const results = comparison?.results ?? [];
   const sweetSpotName = comparison?.sweet_spot_gpu ?? null;
@@ -45,11 +65,26 @@ export default function Dashboard() {
   return (
     <div className="space-y-5">
       {/* Header */}
-      <div>
-        <h1 className="text-xl font-bold tracking-tight text-gray-900">GPU Deployment Optimizer</h1>
-        <p className="mt-1 text-sm text-gray-500">
-          Dynamic infrastructure sizing across NVIDIA Hopper/Blackwell and AMD Instinct — find the sweet spot for your workload.
-        </p>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-xl font-bold tracking-tight text-gray-900">GPU Deployment Optimizer</h1>
+          <p className="mt-1 text-sm text-gray-500">
+            Dynamic infrastructure sizing across NVIDIA Hopper/Blackwell and AMD Instinct — find the sweet spot for your workload.
+          </p>
+        </div>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={copyShareLink}
+          className="shrink-0"
+          title="Copy a link that reproduces this exact workload + constraints + weights"
+        >
+          {copied ? (
+            <><Check className="h-3.5 w-3.5" /> Copied</>
+          ) : (
+            <><LinkIcon className="h-3.5 w-3.5" /> Copy share link</>
+          )}
+        </Button>
       </div>
 
       {/* Summary cards */}
