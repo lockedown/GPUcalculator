@@ -54,3 +54,6 @@ htmlcov/
 
 # Windsurf
 .windsurf/
+
+# Claude Code (local launch.json + worktrees)
+.claude/

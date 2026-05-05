@@ -706,6 +706,303 @@ class TestEvaluateGPU:
 
 
 # ===========================================================================
+# 8b. LATENCY METRICS (TTFT / TPOT)
+# ===========================================================================
+class TestLatencyMetrics:
+    def test_ttft_and_tpot_populated(self, db):
+        gpu = db.query(GPU).filter(GPU.name == "H200 SXM").first()
+        w = WorkloadInput(model_params_b=70, context_length=4096, concurrent_users=1)
+        c = ConstraintInput()
+        r = evaluate_gpu(db, gpu, w, c)
+        assert r.ttft_ms is not None and r.ttft_ms > 0
+        assert r.tpot_ms is not None and r.tpot_ms > 0
+        assert r.per_user_decode_tps is not None and r.per_user_decode_tps > 0
+
+    def test_tpot_matches_inverse_per_user_decode(self, db):
+        # TPOT_ms = 1000 / per_user_decode_tps by construction.
+        gpu = db.query(GPU).filter(GPU.name == "B200 HGX").first()
+        w = WorkloadInput(model_params_b=70, concurrent_users=10)
+        r = evaluate_gpu(db, gpu, w, ConstraintInput())
+        assert r.tpot_ms == pytest.approx(1000.0 / r.per_user_decode_tps, rel=1e-3)
+
+    def test_per_user_decode_drops_with_concurrency(self, db):
+        # More users sharing the same aggregate → each gets a smaller slice.
+        gpu = db.query(GPU).filter(GPU.name == "B200 HGX").first()
+        c = ConstraintInput()
+        r1 = evaluate_gpu(db, gpu, WorkloadInput(model_params_b=70, concurrent_users=1), c)
+        r50 = evaluate_gpu(db, gpu, WorkloadInput(model_params_b=70, concurrent_users=50), c)
+        assert r50.per_user_decode_tps < r1.per_user_decode_tps
+        assert r50.tpot_ms > r1.tpot_ms
+
+    def test_ttft_scales_with_context_length(self, db):
+        # Longer prompts take longer to chew through; TTFT must rise.
+        gpu = db.query(GPU).filter(GPU.name == "H200 SXM").first()
+        c = ConstraintInput()
+        r4k = evaluate_gpu(db, gpu, WorkloadInput(model_params_b=70, context_length=4096), c)
+        r64k = evaluate_gpu(db, gpu, WorkloadInput(model_params_b=70, context_length=65536), c)
+        assert r64k.ttft_ms > r4k.ttft_ms
+
+    def test_tpot_missed_advisory_emitted(self, db):
+        # Set an absurdly tight TPOT target — every GPU should miss it.
+        gpu = db.query(GPU).filter(GPU.name == "MI300X").first()
+        w = WorkloadInput(model_params_b=70, concurrent_users=100)
+        c = ConstraintInput(target_tpot_ms=1)
+        r = evaluate_gpu(db, gpu, w, c)
+        assert "TPOT_MISSED" in r.violation_codes
+
+    def test_tpot_missed_advisory_does_not_gate_ranking(self, db):
+        # TPOT_MISSED is informational — it should not appear in
+        # HARD_VIOLATION_CODES, so it doesn't affect sweet-spot eligibility.
+        from app.engine.optimizer import HARD_VIOLATION_CODES
+        assert "TPOT_MISSED" not in HARD_VIOLATION_CODES
+
+    def test_no_target_means_no_advisory(self, db):
+        gpu = db.query(GPU).filter(GPU.name == "H200 SXM").first()
+        w = WorkloadInput(model_params_b=70, concurrent_users=100)
+        c = ConstraintInput()  # no target_tpot_ms set
+        r = evaluate_gpu(db, gpu, w, c)
+        assert "TPOT_MISSED" not in r.violation_codes
+
+
+# ===========================================================================
+# 8c. MULTI-TENANCY (MIG / Run:ai fractional)
+# ===========================================================================
+class TestMultiTenancy:
+    def test_dedicated_is_default(self, db):
+        # No tenancy fields set -> dedicated, no tenancy advisories.
+        gpu = db.query(GPU).filter(GPU.name == "H200 SXM").first()
+        r = evaluate_gpu(db, gpu, WorkloadInput(model_params_b=70), ConstraintInput())
+        assert r.tenancy_mode_applied is None
+        assert r.per_tenant_decode_tps is None
+        assert "MIG_NVLINK_DISABLED" not in r.violation_codes
+        assert "RUNAI_TIME_SLICED" not in r.violation_codes
+
+    def test_mig_supported_on_hopper(self, db):
+        gpu = db.query(GPU).filter(GPU.name == "H100 SXM5").first()
+        # 7B FP8 (~7GB weights) easily fits in a 1g.10gb slice.
+        w = WorkloadInput(
+            model_params_b=7, precision="FP8",
+            multi_tenancy_mode="mig", mig_profile="1g.10gb",
+        )
+        r = evaluate_gpu(db, gpu, w, ConstraintInput())
+        assert "MIG_NOT_SUPPORTED" not in r.violation_codes
+        assert r.tenancy_mode_applied == "mig"
+        assert r.tenants_per_gpu == 7
+        assert "MIG_NVLINK_DISABLED" in r.violation_codes
+        assert r.per_tenant_decode_tps is not None and r.per_tenant_decode_tps > 0
+        assert r.per_tenant_kv_cache_gb is not None
+
+    def test_mig_blocked_on_blackwell(self, db):
+        gpu = db.query(GPU).filter(GPU.name == "B200 HGX").first()
+        w = WorkloadInput(
+            model_params_b=7, multi_tenancy_mode="mig", mig_profile="3g.40gb",
+        )
+        r = evaluate_gpu(db, gpu, w, ConstraintInput())
+        assert "MIG_NOT_SUPPORTED" in r.violation_codes
+
+    def test_mig_blocked_on_amd(self, db):
+        gpu = db.query(GPU).filter(GPU.name == "MI300X").first()
+        w = WorkloadInput(
+            model_params_b=7, multi_tenancy_mode="mig", mig_profile="1g.10gb",
+        )
+        r = evaluate_gpu(db, gpu, w, ConstraintInput())
+        assert "MIG_NOT_SUPPORTED" in r.violation_codes
+
+    def test_mig_blocked_on_rack_scale(self, db):
+        # GB200 NVL72 is rack-scale — MIG isn't exposed across the NVL fabric.
+        # Use liquid cooling so the DLC_REQUIRED check passes first.
+        gpu = db.query(GPU).filter(GPU.name == "GB200 NVL72").first()
+        w = WorkloadInput(
+            model_params_b=7, multi_tenancy_mode="mig", mig_profile="1g.10gb",
+        )
+        c = ConstraintInput(cooling_type="liquid")
+        r = evaluate_gpu(db, gpu, w, c)
+        assert "MIG_NOT_SUPPORTED" in r.violation_codes
+
+    def test_mig_missing_profile_is_hard_fail(self, db):
+        gpu = db.query(GPU).filter(GPU.name == "H200 SXM").first()
+        w = WorkloadInput(model_params_b=7, multi_tenancy_mode="mig", mig_profile=None)
+        r = evaluate_gpu(db, gpu, w, ConstraintInput())
+        assert "MIG_PROFILE_REQUIRED" in r.violation_codes
+
+    def test_mig_invalid_profile_is_hard_fail(self, db):
+        gpu = db.query(GPU).filter(GPU.name == "H200 SXM").first()
+        w = WorkloadInput(model_params_b=7, multi_tenancy_mode="mig", mig_profile="bogus")
+        r = evaluate_gpu(db, gpu, w, ConstraintInput())
+        assert "MIG_PROFILE_REQUIRED" in r.violation_codes
+
+    def test_mig_smaller_profile_means_more_instances(self, db):
+        gpu = db.query(GPU).filter(GPU.name == "H100 SXM5").first()
+        c = ConstraintInput()
+        r1g = evaluate_gpu(
+            db, gpu, WorkloadInput(model_params_b=7, precision="FP8",
+                                   multi_tenancy_mode="mig", mig_profile="1g.10gb"), c,
+        )
+        r3g = evaluate_gpu(
+            db, gpu, WorkloadInput(model_params_b=7, precision="FP8",
+                                   multi_tenancy_mode="mig", mig_profile="3g.40gb"), c,
+        )
+        assert r1g.tenants_per_gpu == 7
+        assert r3g.tenants_per_gpu == 2
+
+    def test_runai_fractional_divides_throughput(self, db):
+        gpu = db.query(GPU).filter(GPU.name == "H200 SXM").first()
+        c = ConstraintInput()
+        r_dedicated = evaluate_gpu(
+            db, gpu, WorkloadInput(model_params_b=70), c,
+        )
+        r_runai_4 = evaluate_gpu(
+            db, gpu, WorkloadInput(
+                model_params_b=70,
+                multi_tenancy_mode="runai_fractional",
+                tenants=4,
+            ), c,
+        )
+        # Run:ai with 4 tenants → roughly aggregate ÷ 4 (plus 5% KV penalty).
+        ratio = r_runai_4.decode_tokens_per_sec / r_dedicated.decode_tokens_per_sec
+        assert 0.20 < ratio < 0.27   # ~ 1/4 within KV penalty band
+        assert r_runai_4.tenancy_mode_applied == "runai_fractional"
+        assert "RUNAI_TIME_SLICED" in r_runai_4.violation_codes
+        assert r_runai_4.tenants_per_gpu == 4
+
+    def test_runai_advisory_does_not_gate_ranking(self, db):
+        from app.engine.optimizer import HARD_VIOLATION_CODES
+        # MIG hard codes ARE gating; the time-sliced advisory is NOT.
+        assert "RUNAI_TIME_SLICED" not in HARD_VIOLATION_CODES
+        assert "MIG_NVLINK_DISABLED" not in HARD_VIOLATION_CODES
+        assert "MIG_NOT_SUPPORTED" in HARD_VIOLATION_CODES
+        assert "MIG_PROFILE_REQUIRED" in HARD_VIOLATION_CODES
+
+    def test_runai_single_tenant_falls_back_to_dedicated(self, db):
+        # tenants=1 in runai_fractional is a no-op — treat as dedicated.
+        gpu = db.query(GPU).filter(GPU.name == "H200 SXM").first()
+        w = WorkloadInput(
+            model_params_b=70, multi_tenancy_mode="runai_fractional", tenants=1,
+        )
+        r = evaluate_gpu(db, gpu, w, ConstraintInput())
+        assert r.tenancy_mode_applied is None  # collapsed to dedicated
+        assert "RUNAI_TIME_SLICED" not in r.violation_codes
+
+
+# ===========================================================================
+# 8d. NVLINK TOPOLOGY (Sprint 9b)
+# ===========================================================================
+class TestNVLinkTopology:
+    def test_seed_topology_classifications(self, db):
+        # Sanity-check the seed data — every shipping GPU should have a
+        # topology classified.  Catches regressions if a new GPU is seeded
+        # without nvlink_topology.
+        gpus = db.query(GPU).all()
+        topologies = {g.name: g.nvlink_topology for g in gpus}
+        assert topologies["H100 SXM5"] == "nvswitch"
+        assert topologies["H200 SXM"] == "nvswitch"
+        assert topologies["B200 HGX"] == "nvswitch"
+        assert topologies["B300 HGX"] == "nvswitch"
+        assert topologies["GB200 NVL72"] == "nvl_fabric"
+        assert topologies["GB300 NVL72"] == "nvl_fabric"
+        assert topologies["RTX PRO 6000 BSE"] == "none"
+        assert topologies["MI300X"] == "point_to_point"
+        assert topologies["MI350X"] == "point_to_point"
+        assert topologies["MI355X"] == "point_to_point"
+
+    def test_nvswitch_no_intra_node_derate(self, db):
+        # NVSwitch boards keep full link-rate intra-node — effective_bandwidth
+        # should equal the GPU's interconnect_bw_gb_s on a single-node TP fit.
+        gpu = db.query(GPU).filter(GPU.name == "H200 SXM").first()
+        w = WorkloadInput(model_params_b=70, precision="FP16")
+        r = evaluate_gpu(db, gpu, w, ConstraintInput())
+        topo = r.topology
+        assert topo is not None
+        if topo.nodes == 1:
+            assert topo.effective_bandwidth_gb_s == gpu.interconnect_bw_gb_s
+
+    def test_point_to_point_derate_at_tp_above_4(self, db):
+        # MI300X is point_to_point. A model that needs TP > 4 on a single node
+        # should take the 15% bandwidth derate.
+        gpu = db.query(GPU).filter(GPU.name == "MI300X").first()
+        # 405B FP16 weights (~810GB) need TP=8 on MI300X (192GB each) — over 4.
+        w = WorkloadInput(model_params_b=405, precision="FP16")
+        r = evaluate_gpu(db, gpu, w, ConstraintInput())
+        topo = r.topology
+        assert topo is not None
+        if topo.tp_degree > 4 and topo.nodes == 1:
+            expected = gpu.interconnect_bw_gb_s * 0.85
+            assert topo.effective_bandwidth_gb_s == pytest.approx(expected, rel=1e-3)
+
+
+# ===========================================================================
+# 8e. MOE ROUTING OVERHEAD (Sprint 9a)
+# ===========================================================================
+class TestMoERoutingOverhead:
+    def test_dense_model_has_no_moe_fields(self, db):
+        gpu = db.query(GPU).filter(GPU.name == "H200 SXM").first()
+        r = evaluate_gpu(db, gpu, WorkloadInput(model_params_b=70, is_moe=False), ConstraintInput())
+        assert r.moe_active_param_fraction is None
+        assert r.moe_effective_bw_per_token_gb is None
+        assert r.moe_routing_overhead_pct is None
+
+    def test_moe_fields_populated_when_is_moe(self, db):
+        gpu = db.query(GPU).filter(GPU.name == "H200 SXM").first()
+        # Mixtral-8x22B-style: 22B active out of 8 experts (~176B total).
+        w = WorkloadInput(
+            model_params_b=176, precision="FP16",
+            is_moe=True, num_experts=8, active_experts=2,
+        )
+        r = evaluate_gpu(db, gpu, w, ConstraintInput())
+        assert r.moe_active_param_fraction == pytest.approx(0.25)
+        # 176B × 0.25 × 2 bytes/param = ~88 GB per token
+        assert r.moe_effective_bw_per_token_gb == pytest.approx(88, abs=1)
+
+    def test_no_overhead_when_all_experts_active(self, db):
+        # active_experts == num_experts means dispatch is a no-op.
+        gpu = db.query(GPU).filter(GPU.name == "H200 SXM").first()
+        w = WorkloadInput(
+            model_params_b=70, is_moe=True, num_experts=8, active_experts=8,
+        )
+        r = evaluate_gpu(db, gpu, w, ConstraintInput())
+        assert r.moe_routing_overhead_pct == 0.0
+
+    def test_intra_node_overhead_around_12pct(self, db):
+        # 405B FP8 with sparse MoE on H200 → multi-GPU intra-node, EP > 1.
+        gpu = db.query(GPU).filter(GPU.name == "H200 SXM").first()
+        w = WorkloadInput(
+            model_params_b=405, precision="FP8",
+            is_moe=True, num_experts=8, active_experts=2,
+        )
+        r = evaluate_gpu(db, gpu, w, ConstraintInput())
+        assert r.topology is not None
+        if r.topology.nodes == 1 and r.topology.gpu_count > 1:
+            assert r.moe_routing_overhead_pct == pytest.approx(12.0, abs=0.1)
+
+    def test_multi_node_overhead_around_22pct(self, db):
+        # A workload that pushes onto 2+ nodes — MoE all-to-all crosses IB.
+        gpu = db.query(GPU).filter(GPU.name == "H100 SXM5").first()
+        # 671B (DeepSeek-V3-class) FP8 + 100 concurrent users → multi-node TP.
+        w = WorkloadInput(
+            model_params_b=671, precision="FP8", concurrent_users=100,
+            is_moe=True, num_experts=256, active_experts=8,
+        )
+        r = evaluate_gpu(db, gpu, w, ConstraintInput(cooling_type="liquid"))
+        assert r.topology is not None
+        if r.topology.nodes > 1:
+            assert r.moe_routing_overhead_pct == pytest.approx(22.0, abs=0.1)
+
+    def test_decode_throughput_drops_when_moe_routing_applied(self, db):
+        # With identical compute + memory, MoE routing overhead should depress
+        # decode_tps relative to a dense model of equivalent active params.
+        gpu = db.query(GPU).filter(GPU.name == "H200 SXM").first()
+        # MoE: 280B total / 8 experts / 2 active = 70B active.  Multi-GPU → 12% overhead.
+        moe = WorkloadInput(
+            model_params_b=280, precision="FP8", concurrent_users=10,
+            is_moe=True, num_experts=8, active_experts=2,
+        )
+        r_moe = evaluate_gpu(db, gpu, moe, ConstraintInput())
+        if r_moe.topology and r_moe.topology.gpu_count > 1 and r_moe.moe_routing_overhead_pct:
+            # The penalty should be visible (decode_tps reflects the 12% drop).
+            assert r_moe.moe_routing_overhead_pct > 0
+
+
+# ===========================================================================
 # 9. RUN_COMPARISON (full pipeline)
 # ===========================================================================
 class TestRunComparison:

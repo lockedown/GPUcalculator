@@ -14,6 +14,9 @@ function exportCSV(results: GPUResult[]) {
   const headers = [
     "Rank", "GPU", "Vendor", "Score",
     "Decode tok/s", "Prefill tok/s",
+    "TTFT (ms)", "TPOT (ms)", "Per-user decode tok/s",
+    "Tenancy", "Tenants/GPU", "Per-tenant decode tok/s",
+    "MoE Active%", "MoE BW/token (GB)", "MoE Routing overhead%",
     "TCO (USD)", "CapEx (USD)", "OpEx/mo (USD)", "Tokens/USD/mo",
     "Complexity", "Availability",
     "GPU Count", "Nodes", "Strategy",
@@ -27,6 +30,15 @@ function exportCSV(results: GPUResult[]) {
     r.composite_score?.toFixed(4) ?? "",
     r.decode_tokens_per_sec?.toFixed(0) ?? "",
     r.prefill_tokens_per_sec?.toFixed(0) ?? "",
+    r.ttft_ms?.toFixed(0) ?? "",
+    r.tpot_ms?.toFixed(1) ?? "",
+    r.per_user_decode_tps?.toFixed(1) ?? "",
+    r.tenancy_mode_applied ?? "dedicated",
+    r.tenants_per_gpu ?? "",
+    r.per_tenant_decode_tps?.toFixed(1) ?? "",
+    r.moe_active_param_fraction != null ? (r.moe_active_param_fraction * 100).toFixed(0) : "",
+    r.moe_effective_bw_per_token_gb?.toFixed(1) ?? "",
+    r.moe_routing_overhead_pct?.toFixed(0) ?? "",
     r.tco_usd?.toFixed(0) ?? "",
     r.capex_usd?.toFixed(0) ?? "",
     r.opex_monthly_usd?.toFixed(0) ?? "",
@@ -107,6 +119,7 @@ export default function ComparisonTable({ results, sweetSpot, loading }: Props) 
               <th className="px-3 py-3 font-semibold text-gray-500 text-right">Score</th>
               <th className="px-3 py-3 font-semibold text-gray-500 text-right">Decode tok/s</th>
               <th className="px-3 py-3 font-semibold text-gray-500 text-right">Prefill tok/s</th>
+              <th className="px-3 py-3 font-semibold text-gray-500 text-right" title="Per-user time-to-first-token / time-per-output-token at the configured concurrency">TTFT / TPOT</th>
               <th className="px-3 py-3 font-semibold text-gray-500 text-right">TCO (36m)</th>
               <th className="px-3 py-3 font-semibold text-gray-500 text-right">Tokens/$/mo</th>
               <th className="px-3 py-3 font-semibold text-gray-500 text-right">Complexity</th>
@@ -156,6 +169,17 @@ export default function ComparisonTable({ results, sweetSpot, loading }: Props) 
                   <td className="px-3 py-2.5 text-right font-mono text-gray-700">
                     {formatNumber(r.prefill_tokens_per_sec)}
                   </td>
+                  <td className="px-3 py-2.5 text-right font-mono text-[10.5px]">
+                    {r.ttft_ms != null && r.tpot_ms != null ? (
+                      <span className={r.violation_codes.includes("TPOT_MISSED") ? "text-amber-600" : "text-gray-700"}>
+                        {r.ttft_ms < 1000 ? `${r.ttft_ms.toFixed(0)}ms` : `${(r.ttft_ms / 1000).toFixed(1)}s`}
+                        <span className="text-gray-400"> / </span>
+                        {r.tpot_ms.toFixed(0)}ms
+                      </span>
+                    ) : (
+                      <span className="text-gray-300">—</span>
+                    )}
+                  </td>
                   <td className="px-3 py-2.5 text-right font-mono text-gray-700">
                     {formatCurrency(r.tco_usd)}
                   </td>
@@ -176,11 +200,23 @@ export default function ComparisonTable({ results, sweetSpot, loading }: Props) 
                     </span>
                   </td>
                   <td className="px-3 py-2.5">
-                    {r.topology && (
-                      <Badge variant="muted" className="font-mono">
-                        {r.topology.gpu_count}× GPU · {r.topology.parallelism_strategy}
-                      </Badge>
-                    )}
+                    <div className="flex flex-wrap items-center gap-1">
+                      {r.topology && (
+                        <Badge variant="muted" className="font-mono">
+                          {r.topology.gpu_count}× GPU · {r.topology.parallelism_strategy}
+                        </Badge>
+                      )}
+                      {r.tenancy_mode_applied === "mig" && (
+                        <Badge variant="outline" className="font-mono text-[10px] border-violet-300 text-violet-700">
+                          MIG · {r.tenants_per_gpu}/GPU
+                        </Badge>
+                      )}
+                      {r.tenancy_mode_applied === "runai_fractional" && (
+                        <Badge variant="outline" className="font-mono text-[10px] border-blue-300 text-blue-700">
+                          Run:ai · ÷{r.tenants_per_gpu}
+                        </Badge>
+                      )}
+                    </div>
                   </td>
                   <td className="px-3 py-2.5">
                     {r.warnings.length > 0 && (

@@ -16,6 +16,9 @@ import {
   AlertTriangle,
   CheckCircle2,
   TrendingUp,
+  Gauge,
+  Users,
+  Boxes,
 } from "lucide-react";
 
 interface Props {
@@ -28,6 +31,9 @@ const CODE_LABELS: Record<string, { label: string; tone: "warn" | "info" }> = {
   PRE_GA: { label: "Pre-GA specs", tone: "info" },
   MARGINAL_AIR_COOLING: { label: "Marginal air cooling", tone: "warn" },
   COOLING_SOFT: { label: "Liquid recommended", tone: "warn" },
+  TPOT_MISSED: { label: "TPOT target missed", tone: "warn" },
+  MIG_NVLINK_DISABLED: { label: "NVLink disabled (MIG)", tone: "info" },
+  RUNAI_TIME_SLICED: { label: "Time-sliced (Run:ai)", tone: "info" },
 };
 
 export default function SweetSpotDetail({ result, loading }: Props) {
@@ -147,6 +153,123 @@ export default function SweetSpotDetail({ result, loading }: Props) {
             />
           </Section>
         )}
+
+        {/* MoE detail (only when workload.is_moe) */}
+        {result.moe_active_param_fraction != null && (
+          <Section
+            icon={<Boxes className="h-3.5 w-3.5" />}
+            title="MoE detail"
+            tooltip={
+              <>
+                <strong>Active fraction</strong> = active_experts ÷ num_experts. The bandwidth-bound denominator on decode is just the active-expert weight bytes per token. <strong>Routing overhead</strong> is the all-to-all dispatch+combine penalty applied to decode tps: 0% on a single GPU, ~12% intra-node, ~22% multi-node. The decode_tokens_per_sec figure already has this baked in.
+              </>
+            }
+          >
+            <Row
+              label="Active params / token"
+              value={`${(result.moe_active_param_fraction * 100).toFixed(0)}%`}
+            />
+            {result.moe_effective_bw_per_token_gb != null && (
+              <Row
+                label="Active weight bytes / token"
+                value={`${result.moe_effective_bw_per_token_gb.toFixed(1)} GB`}
+              />
+            )}
+            {result.moe_routing_overhead_pct != null && (
+              <Row
+                label="All-to-all routing overhead"
+                value={
+                  result.moe_routing_overhead_pct > 0
+                    ? `−${result.moe_routing_overhead_pct.toFixed(0)}%`
+                    : "0% (single-GPU)"
+                }
+                valueClass={
+                  result.moe_routing_overhead_pct > 0 ? "text-amber-600" : ""
+                }
+              />
+            )}
+          </Section>
+        )}
+
+        {/* Multi-tenancy (only when non-dedicated) */}
+        {result.tenancy_mode_applied && (
+          <Section
+            icon={<Users className="h-3.5 w-3.5" />}
+            title="Multi-tenancy"
+            tooltip={
+              <>
+                <strong>MIG</strong> divides the GPU into hardware partitions; NVLink between instances is disabled (TP forced to 1) and per-tenant memory + bandwidth are scaled by the profile&apos;s slice size. <strong>Run:ai fractional</strong> time-slices the full GPU; per-tenant throughput = aggregate ÷ tenants, with a 5% KV-fragmentation penalty.
+              </>
+            }
+          >
+            <Row
+              label="Mode"
+              value={
+                result.tenancy_mode_applied === "mig"
+                  ? "MIG (hardware partition)"
+                  : result.tenancy_mode_applied === "runai_fractional"
+                    ? "Run:ai fractional"
+                    : result.tenancy_mode_applied
+              }
+            />
+            {result.tenants_per_gpu != null && (
+              <Row label="Tenants / GPU" value={`${result.tenants_per_gpu}×`} />
+            )}
+            {result.per_tenant_decode_tps != null && (
+              <Row
+                label="Per-tenant decode"
+                value={`${formatNumber(result.per_tenant_decode_tps)} tok/s`}
+              />
+            )}
+            {result.per_tenant_kv_cache_gb != null && (
+              <Row
+                label="Per-tenant KV cache"
+                value={`${result.per_tenant_kv_cache_gb.toFixed(2)} GB`}
+              />
+            )}
+          </Section>
+        )}
+
+        {/* Per-user latency */}
+        <Section
+          icon={<Gauge className="h-3.5 w-3.5" />}
+          title="Per-user latency"
+          tooltip={
+            <>
+              <strong>TTFT</strong> = context_length ÷ per-user prefill tok/s. <strong>TPOT</strong> = 1000 ÷ per-user decode tok/s. Aggregate throughput is divided by concurrent_users × batch_size to get the per-user view — what one user actually feels at the configured load.
+            </>
+          }
+        >
+          <Row
+            label="TTFT (time to first token)"
+            value={
+              result.ttft_ms != null
+                ? `${formatNumber(result.ttft_ms)} ms`
+                : "—"
+            }
+          />
+          <Row
+            label="TPOT (per output token)"
+            value={
+              result.tpot_ms != null
+                ? `${result.tpot_ms.toFixed(1)} ms`
+                : "—"
+            }
+            valueClass={
+              result.violation_codes.includes("TPOT_MISSED")
+                ? "text-amber-600 font-semibold"
+                : ""
+            }
+          />
+          <Row
+            label="Per-user decode rate"
+            value={
+              result.per_user_decode_tps != null
+                ? `${formatNumber(result.per_user_decode_tps)} tok/s`
+                : "—"
+            }
+          />
+        </Section>
 
         {/* TCO */}
         <Section

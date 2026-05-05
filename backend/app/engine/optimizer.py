@@ -32,6 +32,7 @@ from app.engine.complexity import calc_complexity
 from app.engine.availability import calc_availability
 from app.engine.calibration import calibrate_decode, calibrate_prefill
 from app.engine.rack_planner import plan_rack_layout
+from app.engine.tenancy import apply_tenancy, TenancyGPUShim
 
 # ---------------------------------------------------------------------------
 # Constraint violation penalty applied to composite score (0-1 scale)
@@ -55,6 +56,12 @@ class Violation:
     MODEL_TOO_LARGE = "MODEL_TOO_LARGE"       # model exceeds GPU's effective capacity
     MARGINAL_AIR_COOLING = "MARGINAL_AIR_COOLING"
     PRE_GA = "PRE_GA"
+    TPOT_MISSED = "TPOT_MISSED"  # advisory: per-user TPOT exceeds target_tpot_ms
+    # Multi-tenancy
+    MIG_NOT_SUPPORTED = "MIG_NOT_SUPPORTED"        # hard: GPU cannot run MIG
+    MIG_PROFILE_REQUIRED = "MIG_PROFILE_REQUIRED"  # hard: MIG mode but no/invalid profile
+    MIG_NVLINK_DISABLED = "MIG_NVLINK_DISABLED"    # advisory: TP=1 forced on MIG
+    RUNAI_TIME_SLICED = "RUNAI_TIME_SLICED"        # advisory: throughput ÷ tenants
 
 # Codes that constitute a hard pass/fail for sweet-spot filtering
 HARD_VIOLATION_CODES: set[str] = {
@@ -65,6 +72,8 @@ HARD_VIOLATION_CODES: set[str] = {
     Violation.DLC_REQUIRED,
     Violation.WORKLOAD_INCOMPATIBLE,
     Violation.MODEL_TOO_LARGE,
+    Violation.MIG_NOT_SUPPORTED,
+    Violation.MIG_PROFILE_REQUIRED,
 }
 
 # Interconnect → inter-node fabric mapping
@@ -75,6 +84,33 @@ GPU_INTERCONNECT_TO_FABRIC: dict[str, str] = {
     "IF v3": "RoCEv2",
     "IF v4": "RoCEv2",
 }
+
+
+# ---------------------------------------------------------------------------
+# MoE routing-overhead model (Sprint 9a)
+# ---------------------------------------------------------------------------
+# Public MoE deployments (Mixtral 8×22B, DeepSeek-V3, Qwen-MoE) report
+# steady-state all-to-all dispatch+combine overhead in the 10-25% band on
+# decode tokens, depending on whether expert-parallelism stays intra-node.
+# These numbers ARE NOT in the calibration table (which is Llama-3-70B dense),
+# so we apply them on top of calibrated decode tps.
+MOE_ROUTING_OVERHEAD_SINGLE_GPU = 0.0    # no all-to-all when EP=1
+MOE_ROUTING_OVERHEAD_INTRA_NODE = 0.12   # NVLink/IF intra-node — observed ~10-15%
+MOE_ROUTING_OVERHEAD_MULTI_NODE = 0.22   # IB cross-node — observed ~20-25%
+
+
+def _moe_routing_overhead(num_experts: int, active_experts: int, nodes: int, gpu_count: int) -> float:
+    """Return the all-to-all dispatch+combine penalty as a fraction in [0, 1].
+
+    Returns 0.0 when no routing is needed (EP=1, dense, or all experts active).
+    """
+    if num_experts <= 1 or active_experts >= num_experts:
+        return 0.0
+    if gpu_count <= 1:
+        return MOE_ROUTING_OVERHEAD_SINGLE_GPU
+    if nodes > 1:
+        return MOE_ROUTING_OVERHEAD_MULTI_NODE
+    return MOE_ROUTING_OVERHEAD_INTRA_NODE
 
 
 # ---------------------------------------------------------------------------
@@ -243,9 +279,25 @@ def calc_topology(
     if nodes > 1:
         penalty = min(0.5, 0.05 * (nodes - 1))
 
+    # Intra-node fabric topology shapes effective bandwidth.
+    #   nvswitch     — full bisection across the baseboard (HGX/DGX 8-GPU).
+    #   nvl_fabric   — NVL72 rack-scale; effectively single-hop at TP up to 72.
+    #   point_to_point — direct NVLink/IF links, no switch. AMD MI3xx-series and
+    #                    legacy NVLink boards take a derate at TP > 4 because
+    #                    the cube-mesh adds an extra hop for non-adjacent peers.
+    #   none / PCIe  — handled by the PCIe branch above; never reached here.
+    nvlink_topology = getattr(gpu, "nvlink_topology", None)
     eff_bw = gpu.interconnect_bw_gb_s
-    if eff_bw and nodes > 1:
-        eff_bw = eff_bw * 0.7
+    if eff_bw:
+        if nodes > 1:
+            eff_bw = eff_bw * 0.7  # cross-node IB hop cost (existing behaviour)
+        if nvlink_topology == "point_to_point" and tp > 4:
+            # Non-adjacent peers traverse 2 hops on a hyper-cube mesh; the
+            # observed all-reduce throughput is ~85% of the link-rate baseline
+            # (NCCL/RCCL benchmarks on MI300X 8-GPU OAM trays).
+            eff_bw = eff_bw * 0.85
+        elif nvlink_topology == "point_to_point" and nodes > 1:
+            penalty = min(0.5, penalty + 0.05)
 
     return TopologyResult(
         gpu_count=gpu_count,
@@ -352,6 +404,36 @@ def evaluate_gpu(
             is_estimated=gpu.is_estimated,
         )
 
+    # --- Multi-tenancy: resolve per-tenant effective specs ---
+    # apply_tenancy returns the per-tenant view of compute/memory/bandwidth.
+    # Hard errors (MIG on Blackwell, missing MIG profile) short-circuit;
+    # advisory codes (MIG_NVLINK_DISABLED, RUNAI_TIME_SLICED) flow through.
+    tenancy = apply_tenancy(
+        gpu,
+        mode=workload.multi_tenancy_mode,
+        mig_profile=workload.mig_profile,
+        tenants=workload.tenants,
+    )
+    if tenancy.error_codes:
+        msgs = []
+        if "MIG_NOT_SUPPORTED" in tenancy.error_codes:
+            msgs.append(f"{gpu.name} ({gpu.generation}) does not support MIG partitioning")
+        if "MIG_PROFILE_REQUIRED" in tenancy.error_codes:
+            msgs.append("MIG mode requires a valid mig_profile")
+        return GPUResult(
+            gpu_id=gpu.id,
+            gpu_name=gpu.name,
+            gpu_vendor=gpu.vendor,
+            warnings=msgs,
+            violation_codes=list(tenancy.error_codes),
+            is_estimated=gpu.is_estimated,
+        )
+
+    # Use the shim wherever calc_topology / calculate_performance / cost-calc
+    # read GPU spec fields directly.  For "dedicated" the shim is a no-op
+    # passthrough (overrides equal real values), so we always wrap.
+    eff_gpu = TenancyGPUShim(gpu, tenancy)
+
     # --- Performance: first pass with concurrent KV cache for sizing ---
     total_sequences = workload.concurrent_users * workload.batch_size
     moe_kwargs = dict(
@@ -364,15 +446,15 @@ def evaluate_gpu(
         precision=workload.precision,
         context_length=workload.context_length,
         batch_size=total_sequences,    # KV cache for ALL concurrent sequences
-        bf16_tflops=gpu.bf16_tflops or 0,
-        mem_bandwidth_tb_s=gpu.mem_bandwidth_tb_s,
-        hbm_capacity_gb=gpu.hbm_capacity_gb,
+        bf16_tflops=eff_gpu.bf16_tflops or 0,
+        mem_bandwidth_tb_s=eff_gpu.mem_bandwidth_tb_s,
+        hbm_capacity_gb=eff_gpu.hbm_capacity_gb,
         gpu_count=1,
         **moe_kwargs,
         # New Phase 4 parameters
-        memory_gb=gpu.memory_gb,
+        memory_gb=eff_gpu.memory_gb,
         memory_type=gpu.memory_type,
-        interconnect_type=gpu.interconnect_type,
+        interconnect_type=eff_gpu.interconnect_type,
         supports_fp4=gpu.supports_fp4,
     )
 
@@ -389,7 +471,7 @@ def evaluate_gpu(
     )
 
     topo = calc_topology(
-        gpu,
+        eff_gpu,
         perf_sizing.model_memory_gb,
         perf_sizing.total_memory_required_gb,
         concurrent_users=workload.concurrent_users,
@@ -406,15 +488,15 @@ def evaluate_gpu(
         precision=workload.precision,
         context_length=workload.context_length,
         batch_size=sequences_per_replica,
-        bf16_tflops=gpu.bf16_tflops or 0,
-        mem_bandwidth_tb_s=gpu.mem_bandwidth_tb_s,
-        hbm_capacity_gb=gpu.hbm_capacity_gb,
+        bf16_tflops=eff_gpu.bf16_tflops or 0,
+        mem_bandwidth_tb_s=eff_gpu.mem_bandwidth_tb_s,
+        hbm_capacity_gb=eff_gpu.hbm_capacity_gb,
         gpu_count=max(1, topo.gpu_count // topo.dp_degree),
         **moe_kwargs,
         # New Phase 4 parameters
-        memory_gb=gpu.memory_gb,
+        memory_gb=eff_gpu.memory_gb,
         memory_type=gpu.memory_type,
-        interconnect_type=gpu.interconnect_type,
+        interconnect_type=eff_gpu.interconnect_type,
         supports_fp4=gpu.supports_fp4,
     )
 
@@ -433,6 +515,70 @@ def evaluate_gpu(
     # Aggregate throughput = sum across all DP replicas
     effective_decode = per_replica_decode * topo.dp_degree
     effective_prefill = per_replica_prefill * topo.dp_degree
+
+    # MoE all-to-all routing overhead — applied to decode only (per-token cost).
+    # This is on top of calibration (which is dense-Llama-3-70B based and does
+    # not reflect MoE dispatch costs).
+    moe_overhead = _moe_routing_overhead(
+        workload.num_experts if workload.is_moe else 1,
+        workload.active_experts if workload.is_moe else 1,
+        topo.nodes,
+        topo.gpu_count,
+    )
+    if moe_overhead > 0:
+        effective_decode *= 1.0 - moe_overhead
+
+    # Run:ai time-slicing — each tenant gets aggregate ÷ tenants. MIG is
+    # already accounted for via the spec downscaling above (compute and
+    # bandwidth fractions), so its divisor stays 1.0.
+    if tenancy.throughput_divisor > 1.0:
+        effective_decode /= tenancy.throughput_divisor
+        effective_prefill /= tenancy.throughput_divisor
+
+    # Per-tenant view = aggregate after tenancy adjustments. For MIG it equals
+    # effective_decode (one tenant per slice). For Run:ai it's the slice each
+    # of N tenants gets. For dedicated it equals aggregate (single tenant).
+    per_tenant_decode_tps = effective_decode if tenancy.tenancy_mode_applied != "dedicated" else None
+
+    # Tenancy advisory codes always flow through to the result.
+    for advisory in tenancy.advisory_codes:
+        if advisory not in codes:
+            codes.append(advisory)
+            if advisory == "MIG_NVLINK_DISABLED":
+                warnings.append(
+                    f"{gpu.name} MIG instances cannot share NVLink — TP forced to 1"
+                )
+            elif advisory == "RUNAI_TIME_SLICED":
+                warnings.append(
+                    f"Run:ai time-slicing across {workload.tenants} tenants — "
+                    f"per-tenant throughput is aggregate ÷ {workload.tenants}"
+                )
+
+    # --- Per-user latency (TTFT, TPOT) ---
+    # Aggregate throughput is shared across `total_sequences` concurrent users,
+    # so per-user rate = aggregate / total_sequences. TTFT is wall-clock time
+    # to chew through one user's prompt of length context_length; TPOT is the
+    # gap between successive output tokens for one user.
+    user_count = max(1, total_sequences)
+    per_user_decode_tps = effective_decode / user_count if effective_decode > 0 else 0.0
+    per_user_prefill_tps = effective_prefill / user_count if effective_prefill > 0 else 0.0
+    tpot_ms = 1000.0 / per_user_decode_tps if per_user_decode_tps > 0 else None
+    ttft_ms = (
+        workload.context_length * 1000.0 / per_user_prefill_tps
+        if per_user_prefill_tps > 0
+        else None
+    )
+
+    # Advisory: TPOT target missed (informational, does not gate ranking)
+    if (
+        constraints.target_tpot_ms is not None
+        and tpot_ms is not None
+        and tpot_ms > constraints.target_tpot_ms
+    ):
+        warnings.append(
+            f"Per-user TPOT {tpot_ms:.0f}ms exceeds target {constraints.target_tpot_ms}ms"
+        )
+        codes.append(Violation.TPOT_MISSED)
 
     # --- Cost (interconnect-aware) ---
     fabric = GPU_INTERCONNECT_TO_FABRIC.get(
@@ -543,6 +689,29 @@ def evaluate_gpu(
         # Each concurrent sequence needs its own KV cache slice
         max_ctx = max(0, max_ctx // sequences_per_replica)
 
+    # MoE-specific surfacing — only meaningful when is_moe.
+    if workload.is_moe and workload.num_experts > 0:
+        moe_active_param_fraction = workload.active_experts / workload.num_experts
+        # Active-expert weight bytes streamed per output token, in GB.
+        from app.engine.performance import PRECISION_BYTES
+        bytes_per_param = PRECISION_BYTES.get(workload.precision, 2.0)
+        active_params_b = workload.model_params_b * moe_active_param_fraction
+        moe_effective_bw_per_token_gb = active_params_b * bytes_per_param  # B params × bytes ⇒ GB
+        moe_routing_overhead_pct = round(moe_overhead * 100, 1) if moe_overhead > 0 else 0.0
+    else:
+        moe_active_param_fraction = None
+        moe_effective_bw_per_token_gb = None
+        moe_routing_overhead_pct = None
+
+    # Per-tenant KV cache: under MIG, the slice's KV envelope is what matters
+    # (not the aggregate); under Run:ai the full GPU KV is shared, but each
+    # tenant pays for their own slice.
+    per_tenant_kv = (
+        perf_sizing.kv_cache_gb / max(1, tenancy.instances_per_gpu)
+        if tenancy.tenancy_mode_applied != "dedicated"
+        else None
+    )
+
     result = GPUResult(
         gpu_id=gpu.id,
         gpu_name=gpu.name,
@@ -551,6 +720,24 @@ def evaluate_gpu(
         tokens_per_sec=effective_decode,
         prefill_tokens_per_sec=effective_prefill,
         decode_tokens_per_sec=effective_decode,
+        ttft_ms=ttft_ms,
+        tpot_ms=tpot_ms,
+        per_user_decode_tps=per_user_decode_tps if per_user_decode_tps > 0 else None,
+        tenancy_mode_applied=(
+            tenancy.tenancy_mode_applied
+            if tenancy.tenancy_mode_applied != "dedicated"
+            else None
+        ),
+        tenants_per_gpu=(
+            tenancy.instances_per_gpu
+            if tenancy.tenancy_mode_applied != "dedicated"
+            else None
+        ),
+        per_tenant_decode_tps=per_tenant_decode_tps,
+        per_tenant_kv_cache_gb=per_tenant_kv,
+        moe_active_param_fraction=moe_active_param_fraction,
+        moe_effective_bw_per_token_gb=moe_effective_bw_per_token_gb,
+        moe_routing_overhead_pct=moe_routing_overhead_pct,
         kv_cache_gb=perf_sizing.kv_cache_gb,   # Total KV for all sequences
         max_context_length=max_ctx,
         tco_usd=cost.tco_36m_usd,

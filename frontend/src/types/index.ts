@@ -15,6 +15,9 @@ export interface GPU {
   cooling_type: string;
   intra_node_interconnect: string | null;
   interconnect_bw_gb_s: number | null;
+  // Intra-node fabric topology — drives bandwidth-derate decisions.
+  // Values: 'nvswitch' | 'nvl_fabric' | 'point_to_point' | 'none' | null.
+  nvlink_topology: NVLinkTopology | null;
   max_gpus_per_node: number;
   is_rack_scale: boolean;
   rack_gpu_count: number | null;
@@ -78,7 +81,53 @@ export interface WorkloadInput {
   num_experts: number;
   active_experts: number;
   finance_benchmark_category: string | null;
+  // Multi-tenancy / fractional GPU.  See backend tenancy.py.
+  multi_tenancy_mode: TenancyMode;
+  mig_profile: MigProfile | null;
+  tenants: number;
 }
+
+export type TenancyMode = "dedicated" | "mig" | "runai_fractional";
+export type MigProfile = "1g.10gb" | "2g.20gb" | "3g.40gb" | "4g.40gb" | "7g.full";
+export type NVLinkTopology = "nvswitch" | "nvl_fabric" | "point_to_point" | "none";
+
+// Human-readable labels for nvlink_topology, used by the hardware page.
+export const NVLINK_TOPOLOGY_LABELS: Record<NVLinkTopology, { label: string; tooltip: string }> = {
+  nvswitch: {
+    label: "NVSwitch",
+    tooltip:
+      "Full bisection bandwidth across the 8-GPU baseboard via the NVSwitch ASIC. Standard on HGX and DGX systems — every GPU pair gets full link rate.",
+  },
+  nvl_fabric: {
+    label: "NVL Fabric",
+    tooltip:
+      "Rack-scale unified NVLink fabric (NVL72). Single-hop bandwidth across all 72 GPUs in the rack, treated as one effective node.",
+  },
+  point_to_point: {
+    label: "Point-to-point",
+    tooltip:
+      "Direct NVLink / Infinity Fabric mesh (no switch). Adjacent peers get full link rate; non-adjacent traffic takes 2 hops, costing ~15% on TP > 4 (matches NCCL/RCCL all-reduce benchmarks).",
+  },
+  none: {
+    label: "PCIe only",
+    tooltip:
+      "No multi-GPU NVLink fabric — each card is an island on PCIe. Tensor parallelism is not available; multi-GPU scales DP-only.",
+  },
+};
+
+export const MIG_PROFILE_OPTIONS: { value: MigProfile; label: string }[] = [
+  { value: "1g.10gb", label: "1g.10gb · 1/7 compute · 1/8 memory · 7/GPU" },
+  { value: "2g.20gb", label: "2g.20gb · 2/7 compute · 1/4 memory · 3/GPU" },
+  { value: "3g.40gb", label: "3g.40gb · 3/7 compute · 1/2 memory · 2/GPU" },
+  { value: "4g.40gb", label: "4g.40gb · 4/7 compute · 1/2 memory · 1/GPU" },
+  { value: "7g.full", label: "7g.full · full GPU as one MIG instance" },
+];
+
+export const TENANCY_MODE_OPTIONS: { value: TenancyMode; label: string }[] = [
+  { value: "dedicated", label: "Dedicated (one workload owns the GPU)" },
+  { value: "mig", label: "MIG (NVIDIA hardware partition — Hopper only)" },
+  { value: "runai_fractional", label: "Run:ai fractional (software time-slicing)" },
+];
 
 export interface ConstraintInput {
   max_budget_usd: number | null;
@@ -96,6 +145,9 @@ export interface ConstraintInput {
     complexity: number;
     availability: number;
   };
+  // Optional per-user latency target (ms). Candidates whose TPOT exceeds it
+  // get the TPOT_MISSED advisory; ranking is unaffected.
+  target_tpot_ms: number | null;
 }
 
 export interface TopologyResult {
@@ -139,6 +191,19 @@ export interface GPUResult {
   tokens_per_sec: number | null;
   prefill_tokens_per_sec: number | null;
   decode_tokens_per_sec: number | null;
+  // Per-user latency view at the configured concurrency.
+  ttft_ms: number | null;
+  tpot_ms: number | null;
+  per_user_decode_tps: number | null;
+  // Multi-tenancy view — populated only when multi_tenancy_mode != "dedicated".
+  tenancy_mode_applied: TenancyMode | null;
+  tenants_per_gpu: number | null;
+  per_tenant_decode_tps: number | null;
+  per_tenant_kv_cache_gb: number | null;
+  // MoE-specific surfacing — populated only when workload.is_moe.
+  moe_active_param_fraction: number | null;
+  moe_effective_bw_per_token_gb: number | null;
+  moe_routing_overhead_pct: number | null;
   kv_cache_gb: number | null;
   max_context_length: number | null;
   tco_usd: number | null;

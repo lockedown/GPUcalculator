@@ -23,6 +23,9 @@ const DEFAULT_WORKLOAD: WorkloadInput = {
   num_experts: 8,
   active_experts: 2,
   finance_benchmark_category: null,
+  multi_tenancy_mode: "dedicated",
+  mig_profile: null,
+  tenants: 1,
 };
 
 const DEFAULT_CONSTRAINTS: ConstraintInput = {
@@ -40,6 +43,7 @@ const DEFAULT_CONSTRAINTS: ConstraintInput = {
     complexity: 0.15,
     availability: 0.20,
   },
+  target_tpot_ms: null,
 };
 
 const WEIGHT_KEYS = ["performance", "cost", "complexity", "availability"] as const;
@@ -77,6 +81,7 @@ export function encodeStateToParams(
     "colo_usd_per_kw_per_month",
     "hw_support_pct_of_capex_per_year",
     "software_usd_per_gpu_per_year",
+    "target_tpot_ms",
   ];
   for (const key of flatConstraintKeys) {
     const v = constraints[key];
@@ -120,6 +125,7 @@ export function decodeParamsToState(
     "batch_size",
     "num_experts",
     "active_experts",
+    "tenants",
   ];
   for (const key of numericWorkload) {
     const v = params.get(key);
@@ -130,7 +136,13 @@ export function decodeParamsToState(
   }
 
   // String / enum workload fields
-  for (const key of ["precision", "workload_type", "finance_benchmark_category"] as const) {
+  for (const key of [
+    "precision",
+    "workload_type",
+    "finance_benchmark_category",
+    "multi_tenancy_mode",
+    "mig_profile",
+  ] as const) {
     const v = params.get(key);
     if (v !== null) (workload as Record<string, unknown>)[key] = v;
   }
@@ -148,6 +160,7 @@ export function decodeParamsToState(
     "colo_usd_per_kw_per_month",
     "hw_support_pct_of_capex_per_year",
     "software_usd_per_gpu_per_year",
+    "target_tpot_ms",
   ];
   for (const key of numericConstraints) {
     const v = params.get(key);

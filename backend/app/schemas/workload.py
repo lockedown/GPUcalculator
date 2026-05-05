@@ -16,6 +16,32 @@ class WorkloadInput(BaseModel):
     finance_benchmark_category: str | None = Field(
         None, description="Optional: quant, risk, inference, hpc, trading, tokenization"
     )
+    # ---- Multi-tenancy / fractional GPU (Run:ai-style) ----
+    multi_tenancy_mode: str = Field(
+        "dedicated",
+        description=(
+            "GPU partitioning mode. 'dedicated' = one workload owns the GPU. "
+            "'mig' = NVIDIA MIG hardware partition (Hopper only). "
+            "'runai_fractional' = software time-sliced (e.g. Run:ai)."
+        ),
+    )
+    mig_profile: str | None = Field(
+        None,
+        description=(
+            "MIG profile when multi_tenancy_mode='mig'. Common values: "
+            "'1g.10gb' (7/GPU), '2g.20gb' (3/GPU), '3g.40gb' (2/GPU), "
+            "'4g.40gb' (1/GPU), '7g.full' (1/GPU full-GPU MIG)."
+        ),
+    )
+    tenants: int = Field(
+        1,
+        description=(
+            "Number of co-located tenants. Informational under 'dedicated'; "
+            "for 'runai_fractional' divides per-GPU throughput by this number "
+            "(time-slicing). For 'mig' it's overridden by the profile's "
+            "instances_per_gpu."
+        ),
+    )
 
 
 class ConstraintInput(BaseModel):
@@ -44,6 +70,14 @@ class ConstraintInput(BaseModel):
     metric_weights: dict[str, float] = Field(
         default={"performance": 0.35, "cost": 0.30, "complexity": 0.15, "availability": 0.20},
         description="Weights for each metric (should sum to 1.0)",
+    )
+    target_tpot_ms: int | None = Field(
+        None,
+        description=(
+            "Optional target time-per-output-token in ms. Candidates whose "
+            "per-user TPOT exceeds this raise the TPOT_MISSED advisory; "
+            "purely informational, does not block ranking."
+        ),
     )
 
 
@@ -88,6 +122,30 @@ class GPUResult(BaseModel):
     tokens_per_sec: float | None = None
     prefill_tokens_per_sec: float | None = None
     decode_tokens_per_sec: float | None = None
+    # Per-user latency view — what one user actually experiences at the
+    # configured concurrency. ttft_ms = context_length / per_user_prefill_tps;
+    # tpot_ms = 1000 / per_user_decode_tps. Both are derived (no extra cost).
+    ttft_ms: float | None = None
+    tpot_ms: float | None = None
+    per_user_decode_tps: float | None = None
+    # Multi-tenancy view — populated only when multi_tenancy_mode != "dedicated".
+    # tenancy_mode_applied echoes the mode actually applied (may differ from
+    # request if hard-gated, e.g. MIG on Blackwell falls back to dedicated with
+    # MIG_NOT_SUPPORTED in violation_codes).
+    tenancy_mode_applied: str | None = None
+    tenants_per_gpu: int | None = None
+    per_tenant_decode_tps: float | None = None
+    per_tenant_kv_cache_gb: float | None = None
+    # MoE-specific surfacing — populated only when workload.is_moe.
+    # active_param_fraction = active_experts / num_experts; effective_bw_per_token
+    # is the active-expert weight bytes streamed per output token (the
+    # bandwidth-bound denominator visible to the customer);
+    # routing_overhead_pct is the all-to-all dispatch/combine penalty that's
+    # already baked into decode_tokens_per_sec (negative number — surfaced for
+    # transparency).
+    moe_active_param_fraction: float | None = None
+    moe_effective_bw_per_token_gb: float | None = None
+    moe_routing_overhead_pct: float | None = None
     kv_cache_gb: float | None = None
     max_context_length: int | None = None
     tco_usd: float | None = None

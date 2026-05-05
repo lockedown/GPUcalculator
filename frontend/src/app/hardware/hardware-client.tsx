@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import type { GPU } from "@/types";
-import { GPU_COLORS } from "@/types";
+import { GPU_COLORS, NVLINK_TOPOLOGY_LABELS } from "@/types";
 import { formatNumber } from "@/lib/utils";
 import { Droplets, Wind, ChevronRight } from "lucide-react";
 import { Card } from "@/components/ui/card";
@@ -101,6 +101,15 @@ export default function HardwareClient({ initialGpus }: Props) {
                     ? `${gpu.interconnect_bw_gb_s} GB/s`
                     : "—"
                 }
+              />
+              <Stat
+                label="Topology"
+                value={
+                  gpu.nvlink_topology
+                    ? NVLINK_TOPOLOGY_LABELS[gpu.nvlink_topology].label
+                    : "—"
+                }
+                sub={gpu.nvlink_topology ?? undefined}
               />
             </div>
 

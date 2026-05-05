@@ -1,7 +1,15 @@
 "use client";
 
 import { useStore } from "@/lib/store";
-import { WORKLOAD_CATEGORIES, PRECISION_OPTIONS, BENCHMARK_CATEGORIES } from "@/types";
+import {
+  WORKLOAD_CATEGORIES,
+  PRECISION_OPTIONS,
+  BENCHMARK_CATEGORIES,
+  MIG_PROFILE_OPTIONS,
+  TENANCY_MODE_OPTIONS,
+  type MigProfile,
+  type TenancyMode,
+} from "@/types";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { NumericInput } from "@/components/ui/numeric-input";
 import { InfoTooltip } from "@/components/ui/info-tooltip";
@@ -213,6 +221,90 @@ export default function WorkloadForm() {
                 {workload.active_experts}/{workload.num_experts} active — effective {((workload.active_experts / workload.num_experts) * workload.model_params_b).toFixed(0)}B params/token
               </span>
             </>
+          )}
+        </div>
+
+        {/* Multi-tenancy row */}
+        <div className="mt-4 flex flex-wrap items-end gap-4 border-t border-gray-100 pt-4">
+          <div className="flex flex-col gap-1.5">
+            <FieldLabel
+              label="GPU Tenancy"
+              tooltip={
+                <>
+                  <strong>Dedicated</strong> = one workload owns the GPU. <strong>MIG</strong> = NVIDIA hardware partitioning (Hopper only — H100/H200) — divides compute &amp; memory into instances; NVLink between instances is disabled. <strong>Run:ai fractional</strong> = software time-slicing — full GPU resources but per-tenant throughput is divided by N tenants, plus a small KV-fragmentation penalty.
+                </>
+              }
+            />
+            <Select
+              value={workload.multi_tenancy_mode}
+              onValueChange={(v) =>
+                setWorkload({
+                  multi_tenancy_mode: v as TenancyMode,
+                  // Reset MIG profile when leaving MIG mode
+                  mig_profile: v === "mig" ? workload.mig_profile ?? "1g.10gb" : null,
+                })
+              }
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {TENANCY_MODE_OPTIONS.map((m) => (
+                  <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {workload.multi_tenancy_mode === "mig" && (
+            <div className="flex flex-col gap-1.5">
+              <label className="flex items-center gap-1 text-[11px] font-medium text-gray-500">
+                MIG Profile
+                <InfoTooltip>
+                  Profile name follows the standard NVIDIA convention: <code>{`<compute_GIs>g.<memory_GB>`}</code>. The number after &quot;g&quot; is the GPC count out of 7; memory slices are 1/8ths of the HBM stack. Hopper GPUs (H100/H200) only.
+                </InfoTooltip>
+              </label>
+              <Select
+                value={workload.mig_profile ?? "1g.10gb"}
+                onValueChange={(v) => setWorkload({ mig_profile: v as MigProfile })}
+              >
+                <SelectTrigger className="w-72">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {MIG_PROFILE_OPTIONS.map((p) => (
+                    <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+
+          {workload.multi_tenancy_mode === "runai_fractional" && (
+            <div className="flex flex-col gap-1.5">
+              <label className="flex items-center gap-1 text-[11px] font-medium text-gray-500">
+                Tenants per GPU
+                <InfoTooltip>
+                  Number of co-located tenants time-sharing one GPU. Each tenant&apos;s aggregate throughput = full-GPU throughput ÷ tenants. A 5% KV-fragmentation penalty is applied to reflect cache-eviction churn.
+                </InfoTooltip>
+              </label>
+              <NumericInput
+                min={2}
+                max={32}
+                fallback={2}
+                value={workload.tenants}
+                onChange={(v) => setWorkload({ tenants: v ?? 2 })}
+                className="w-24"
+              />
+            </div>
+          )}
+
+          {workload.multi_tenancy_mode !== "dedicated" && (
+            <span className="text-[10px] text-gray-400 pb-2 max-w-md">
+              {workload.multi_tenancy_mode === "mig"
+                ? "Sizing one tenant on one MIG slice. GPUs that don't support MIG (Blackwell, AMD, RTX) are filtered out with MIG_NOT_SUPPORTED."
+                : `Each of ${workload.tenants} tenants gets aggregate ÷ ${workload.tenants} throughput. NVLink stays available, all memory accessible.`}
+            </span>
           )}
         </div>
       </CardContent>
