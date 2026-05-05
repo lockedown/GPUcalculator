@@ -55,6 +55,9 @@ const DEFAULT_WORKLOAD: WorkloadInput = {
   num_experts: 8,
   active_experts: 2,
   finance_benchmark_category: null,
+  multi_tenancy_mode: "dedicated",
+  mig_profile: null,
+  tenants: 1,
 };
 
 const DEFAULT_CONSTRAINTS: ConstraintInput = {
@@ -72,6 +75,7 @@ const DEFAULT_CONSTRAINTS: ConstraintInput = {
     complexity: 0.15,
     availability: 0.2,
   },
+  target_tpot_ms: null,
 };
 
 export const useStore = create<AppState>((set, get) => ({

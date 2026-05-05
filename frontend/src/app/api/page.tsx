@@ -261,9 +261,20 @@ export default function ApiDocsPage() {
             { term: "results[].tokens_per_usd", def: "Aggregate decode tokens / amortised $ / month — value-per-dollar." },
             { term: "results[].decode_tokens_per_sec", def: "Memory-bandwidth-bound aggregate across all DP replicas, calibrated against L3-70B benchmark." },
             { term: "results[].prefill_tokens_per_sec", def: "Compute-bound (with O(L) attention term applied) aggregate across replicas." },
+            { term: "results[].ttft_ms", def: "Time-to-first-token per user (ms) at the configured concurrency. context_length ÷ (aggregate prefill ÷ concurrent_users × batch_size)." },
+            { term: "results[].tpot_ms", def: "Time-per-output-token per user (ms). 1000 ÷ per_user_decode_tps. The number meeting attendees argue over." },
+            { term: "results[].per_user_decode_tps", def: "Decode rate one user actually sees: aggregate decode ÷ concurrent_users × batch_size." },
+            { term: "results[].tenancy_mode_applied", def: "null when dedicated; 'mig' or 'runai_fractional' when partitioning is active. Echoes back the mode the engine actually applied (a request that hard-fails to apply gets a violation_code instead)." },
+            { term: "results[].tenants_per_gpu", def: "MIG: instances per physical GPU per the chosen profile (e.g. 7 for 1g.10gb). Run:ai: workload.tenants. null for dedicated." },
+            { term: "results[].per_tenant_decode_tps", def: "Aggregate decode tokens/sec one tenant gets after MIG partitioning or Run:ai time-slicing. null for dedicated." },
+            { term: "results[].per_tenant_kv_cache_gb", def: "KV-cache slice (GB) one tenant gets. null for dedicated." },
+            { term: "results[].moe_active_param_fraction", def: "active_experts ÷ num_experts (0–1). Populated only when workload.is_moe. The bandwidth-bound denominator on decode is just the active-expert weight bytes per token, not all params." },
+            { term: "results[].moe_effective_bw_per_token_gb", def: "Active-expert weight bytes streamed per output token, in GB. = active_params_b × bytes_per_param. The number you'd divide GPU bandwidth by to estimate decode tps under MoE." },
+            { term: "results[].moe_routing_overhead_pct", def: "All-to-all dispatch+combine overhead applied to decode tps. 0 on single-GPU EP, ~12 intra-node, ~22 multi-node. The decode_tokens_per_sec figure already has this baked in — surfaced for transparency." },
+            { term: "GPU.nvlink_topology", def: "Intra-node fabric topology: 'nvswitch' (full bisection on HGX/DGX 8-GPU baseboards), 'nvl_fabric' (NVL72 rack-scale), 'point_to_point' (legacy direct-link mesh — AMD MI3xx etc; takes a 15% bandwidth derate at TP > 4), or 'none' (PCIe-only)." },
             { term: "results[].topology", def: "{ gpu_count, nodes, gpus_per_node, parallelism_strategy, tp_degree, pp_degree, dp_degree, … }" },
             { term: "results[].rack_plan", def: "{ total_racks, gpus_per_rack, pdu_tier, power_per_rack_kw, cooling_capacity_kw, fits_cooling, … }" },
-            { term: "results[].violation_codes", def: "string[] — stable codes for constraints/advisories (BUDGET_EXCEEDED, COOLING_HARD/SOFT, DLC_REQUIRED, MARGINAL_AIR_COOLING, PRE_GA, etc.). Drive your own filter UIs from these instead of warning-text matching." },
+            { term: "results[].violation_codes", def: "string[] — stable codes for constraints/advisories (BUDGET_EXCEEDED, COOLING_HARD/SOFT, DLC_REQUIRED, MARGINAL_AIR_COOLING, TPOT_MISSED, MIG_NOT_SUPPORTED, MIG_PROFILE_REQUIRED, MIG_NVLINK_DISABLED, RUNAI_TIME_SLICED, PRE_GA, etc.). Drive your own filter UIs from these instead of warning-text matching." },
           ]} />
         </Section>
 

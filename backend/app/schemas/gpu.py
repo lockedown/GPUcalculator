@@ -17,6 +17,7 @@ class GPUBase(BaseModel):
     cooling_type: str = "air"
     intra_node_interconnect: str | None = None
     interconnect_bw_gb_s: float | None = None
+    nvlink_topology: str | None = None
     max_gpus_per_node: int = 8
     is_rack_scale: bool = False
     rack_gpu_count: int | None = None

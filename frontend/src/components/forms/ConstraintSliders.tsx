@@ -49,7 +49,7 @@ export default function ConstraintSliders() {
         <CardTitle>Constraints & Weights</CardTitle>
       </CardHeader>
       <CardContent>
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
           {/* Budget */}
           <div className="flex flex-col gap-1.5">
             <label className="flex items-center gap-1 text-[11px] font-medium text-gray-500">
@@ -148,6 +148,23 @@ export default function ConstraintSliders() {
                 <SelectItem value="60">5 years (60 mo)</SelectItem>
               </SelectContent>
             </Select>
+          </div>
+
+          {/* Target TPOT */}
+          <div className="flex flex-col gap-1.5">
+            <label className="flex items-center gap-1 text-[11px] font-medium text-gray-500">
+              Target TPOT (ms)
+              <InfoTooltip>
+                Target time-per-output-token per user, in milliseconds. Candidates whose per-user TPOT exceeds this raise a TPOT_MISSED advisory — informational only, ranking is unaffected. 50 ms ≈ 20 tok/s/user (chat-fast); 100 ms ≈ 10 tok/s/user (acceptable); 200+ ms feels sluggish.
+              </InfoTooltip>
+            </label>
+            <NumericInput
+              min={1}
+              nullable
+              placeholder="No target"
+              value={constraints.target_tpot_ms}
+              onChange={(v) => setConstraints({ target_tpot_ms: v })}
+            />
           </div>
         </div>
 

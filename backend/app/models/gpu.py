@@ -43,6 +43,12 @@ class GPU(Base):
     
     # New interconnect and cooling fields
     interconnect_type = Column(String(50), nullable=True)  # PCIe, NVLink 4, NVLink 5
+    # Intra-node fabric topology — drives bandwidth-derate decisions in
+    # calc_topology. Values: 'nvswitch' (full bisection, e.g. HGX/DGX 8-GPU
+    # baseboards), 'nvl_fabric' (NVL72 rack-scale fabric), 'point_to_point'
+    # (legacy NVLink direct links, no switch), 'none' (PCIe-only or no
+    # multi-GPU fabric).
+    nvlink_topology = Column(String(20), nullable=True)
     cooling_requirement = Column(String(20), nullable=True)  # Air, DLC, Any
     
     # Supported workloads as JSON array
