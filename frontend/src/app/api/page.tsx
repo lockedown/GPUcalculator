@@ -21,6 +21,7 @@ const SECTIONS = [
   { id: "networking", label: "Networking" },
   { id: "export", label: "Export" },
   { id: "fields", label: "Key response fields" },
+  { id: "meta", label: "Engine meta" },
   { id: "openapi", label: "OpenAPI spec" },
 ];
 
@@ -274,12 +275,37 @@ export default function ApiDocsPage() {
             { term: "results[].moe_effective_bw_per_token_gb", def: "Active-expert weight bytes streamed per output token, in GB. = active_params_b × bytes_per_param. The number you'd divide GPU bandwidth by to estimate decode tps under MoE." },
             { term: "results[].moe_routing_overhead_pct", def: "All-to-all dispatch+combine overhead applied to decode tps. 0 on single-GPU EP, ~12 intra-node, ~22 multi-node. The decode_tokens_per_sec figure already has this baked in — surfaced for transparency." },
             { term: "GPU.nvlink_topology", def: "Intra-node fabric topology: 'nvswitch' (full bisection on HGX/DGX 8-GPU baseboards), 'nvl_fabric' (NVL72 rack-scale), 'point_to_point' (legacy direct-link mesh — AMD MI3xx etc; takes a 15% bandwidth derate at TP > 4), or 'none' (PCIe-only)." },
+            { term: "GPU.msrp_as_of", def: "ISO YYYY-MM-DD when GPU.msrp_usd was last verified against a known-good source (NVIDIA / AMD MSRPs, UBS / SemiAnalysis channel surveys). null on rows that pre-date the v2.3 freshness-stamp rollout. Operators bump this via the refresh script (see Engine meta below)." },
             { term: "results[].topology", def: "{ gpu_count, nodes, gpus_per_node, parallelism_strategy, tp_degree, pp_degree, dp_degree, serving_mode, prefill_gpu_count, decode_gpu_count, prefill_role_strategy, decode_role_strategy, … }" },
             { term: "results[].topology.serving_mode", def: "'colocated' | 'disaggregated'. Echoes back the workload.serving_mode that was applied. In colocated mode prefill_gpu_count == decode_gpu_count == gpu_count. In disaggregated mode they show a recommended 30/70 split (Dynamo / DeepSeek-V3 default ratio)." },
             { term: "results[].topology.prefill_gpu_count / decode_gpu_count", def: "Per-role GPU allocation. Sizing + cost are still computed against the unified gpu_count even in disaggregated mode — v1 is observability scaffolding; heterogeneous SKUs per role land in v2." },
             { term: "results[].rack_plan", def: "{ total_racks, gpus_per_rack, pdu_tier, power_per_rack_kw, cooling_capacity_kw, fits_cooling, … }" },
             { term: "results[].violation_codes", def: "string[] — stable codes for constraints/advisories (BUDGET_EXCEEDED, COOLING_HARD/SOFT, DLC_REQUIRED, MARGINAL_AIR_COOLING, TPOT_MISSED, MIG_NOT_SUPPORTED, MIG_PROFILE_REQUIRED, MIG_NVLINK_DISABLED, RUNAI_TIME_SLICED, DISAGG_RECOMMENDED, PRE_GA, etc.). Drive your own filter UIs from these instead of warning-text matching." },
           ]} />
+        </Section>
+
+        {/* Engine meta */}
+        <Section id="meta" title="Engine meta">
+          <p>
+            Versioning metadata for the calibration anchors and pricing data.
+            Surfaced on the dashboard methodology page so users can tell at
+            a glance how recent the underlying numbers are.
+          </p>
+          <Endpoint
+            method="GET"
+            path="/api/meta"
+            desc="Returns { calibration_version, calibration_basis }. The version is bumped in lockstep with REFERENCE_DECODE / REFERENCE_PREFILL refreshes; the calibration smoke test (tests/test_calibration.py) prevents either from drifting without the other."
+            curl={`curl ${API_BASE}/meta`}
+          />
+          <p className="text-[11px] text-gray-500">
+            Per-GPU price freshness lives on the GPU rows themselves —{" "}
+            <code>GPU.msrp_as_of</code> in <code>/api/hardware</code> is the ISO
+            date the catalogue MSRP was last verified against a known-good
+            source. The refresh path (<code>backend/scripts/update_gpu_prices.py</code>)
+            accepts a JSON payload of <code>{`{name, msrp_usd}`}</code> entries
+            stamped with an <code>as_of</code> date and updates both the GPU
+            row and the <code>price_history</code> audit trail in one batch.
+          </p>
         </Section>
 
         {/* OpenAPI */}

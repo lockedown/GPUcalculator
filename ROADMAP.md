@@ -2,11 +2,13 @@
 
 Tracks where the GPU Deployment Optimizer is going.
 
-**Current shipping version: v2.2.** The API-review backlog (TTFT/TPOT, MoE
+**Current shipping version: v2.3.** The API-review backlog (TTFT/TPOT, MoE
 routing, NVLink topology, MIG / Run:ai multi-tenancy, disaggregated
 prefill/decode) landed in v2.0, then got a code-quality cleanup pass in
 v2.1, then customer-fit polish (sweet-spot explainer, workload templates,
-carbon cost, regional pricing, optimizer perf SLO) in v2.2.
+carbon cost, regional pricing, optimizer perf SLO) in v2.2, then data
+freshness (price `msrp_as_of` stamp + refresh script + calibration version
+stamp + drift smoke test) in v2.3.
 
 ## v2.2 — sweet-spot fluency + customer fit (✅ shipped)
 
@@ -23,17 +25,18 @@ of customer payoff to engineering effort.
 | 5 | **Sprint-10 v2: heterogeneous SKU disaggregation** — let the user pick GPU A for the prefill pool and GPU B for the decode pool; size + cost both pools independently. | Closes the "real customer ask" hinted at in the original API review. The deferred follow-up. | L |
 | 6 | **Power-cost regional override** — replace the single `colo_usd_per_kw_per_month` input with a region picker (US-East / US-West / EU / APAC) that swaps in CBRE-derived defaults. | Today's number is US-only; non-US customers get wrong TCO out of the box. | S |
 
-## v2.3 — data quality + freshness
+## v2.3 — data quality + freshness (partially shipped)
 
 Lower customer visibility but matters for the engine's credibility over time.
+**Items 8 and 11 shipped in v2.3**; 7, 9, 10 deferred to v2.3b/v2.4.
 
-| # | Item | Why | Effort |
-|---|------|-----|--------|
-| 7 | **Single-source GPU data** — collapse `neon_update.sql` and `seed.py` GPU_EXTRA_DATA into one canonical YAML/JSON the build reads from. | Prevents the schema-vs-prod-DB desync we hit during the v2.0 deploy. | M |
-| 8 | **Calibration freshness stamp** — `REFERENCE_DECODE` / `REFERENCE_PREFILL` are anchored to specific benchmark snapshots. Surface a "calibration version" + a smoke test that flags drift against a fresh snapshot. | The reference numbers will go stale; protect against silent drift. | M |
-| 9 | **Scheduled benchmark refresh** — cron that pulls latest MLPerf / vLLM / NVIDIA published results into the calibration table. | Tied to #8; blocked until that lands. | M |
-| 10 | **Reliability / spares model** — account for fault-tolerant capacity (e.g. +N% over baseline `gpu_count` for HA). | Real production deployments don't size to baseline; current numbers are slightly optimistic. | M |
-| 11 | **Price freshness + auto-refresh** — same pattern as #8 but for the pricing data. Adds an `msrp_as_of` date column to `gpus`, surfaces "Prices as of YYYY-MM-DD" on the comparison table + per-GPU detail page, and ships a refresh mechanism (small admin endpoint + scheduled cron) that pulls from known-good sources — NVIDIA / AMD official MSRPs, channel surveys (UBS, SemiAnalysis), CBRE colo rates, EPA eGRID grid intensity — and writes new `price_history` entries automatically. Today's MSRPs are static and unstamped: a customer reading "$30k" doesn't know whether that reflects 2024 launch, 2026 channel reality, or hand-wave estimate. | Pricing in this sector is moving 10-30% per year; without stamps + auto-refresh the dashboard's most-asked numbers will silently drift. Pairs with #7 (data must be in the canonical YAML so refresh has a structured target to write back to) and #8 (same staleness pattern, different data). | M |
+| # | Item | Why | Effort | Status |
+|---|------|-----|--------|--------|
+| 7 | **Single-source GPU data** — collapse `neon_update.sql` and `seed.py` GPU_EXTRA_DATA into one canonical YAML/JSON the build reads from. | Prevents the schema-vs-prod-DB desync we hit during the v2.0 deploy. | M | deferred |
+| 8 | **Calibration freshness stamp** — `REFERENCE_DECODE` / `REFERENCE_PREFILL` are anchored to specific benchmark snapshots. Surface a "calibration version" + a smoke test that flags drift against a fresh snapshot. | The reference numbers will go stale; protect against silent drift. | M | ✅ v2.3 |
+| 9 | **Scheduled benchmark refresh** — cron that pulls latest MLPerf / vLLM / NVIDIA published results into the calibration table. | Tied to #8; blocked until that lands. | M | deferred |
+| 10 | **Reliability / spares model** — account for fault-tolerant capacity (e.g. +N% over baseline `gpu_count` for HA). | Real production deployments don't size to baseline; current numbers are slightly optimistic. | M | deferred |
+| 11 | **Price freshness + refresh script** — `msrp_as_of` date column on `gpus`, surfaced as "(as of YYYY-MM-DD)" next to the price on the hardware page + GPU detail card. Refresh mechanism: `backend/scripts/update_gpu_prices.py` accepts a JSON payload `{as_of, source, gpus: [{name, msrp_usd}]}` from stdin or `--input file.json` and updates both `gpus.msrp_usd` + `msrp_as_of` and the `price_history` audit trail in one batch (with `--dry-run` to preview). | Pricing in this sector is moving 10-30% per year; without stamps + refresh the dashboard's most-asked numbers silently drift. | M | ✅ v2.3 |
 
 ## Deferred / parking lot
 

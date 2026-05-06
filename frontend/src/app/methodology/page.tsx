@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
+import { fetchEngineMeta } from "@/lib/server-api";
 
 export const metadata: Metadata = {
   title: "Methodology — GPU Deployment Optimizer",
@@ -20,7 +21,8 @@ const SECTIONS = [
   { id: "caveats", label: "Caveats & known limits" },
 ];
 
-export default function MethodologyPage() {
+export default async function MethodologyPage() {
+  const meta = await fetchEngineMeta();
   return (
     <div className="grid gap-8 xl:grid-cols-[220px_1fr]">
       {/* Sticky table of contents */}
@@ -345,10 +347,18 @@ export default function MethodologyPage() {
           </ul>
         </Section>
 
-        <footer className="border-t border-gray-200 pt-6 mt-8">
+        <footer className="border-t border-gray-200 pt-6 mt-8 flex flex-wrap items-center justify-between gap-3">
           <Link href="/" className="text-xs text-blue-600 hover:underline">
             ← Back to dashboard
           </Link>
+          {meta && (
+            <span
+              className="text-[10px] font-mono text-gray-400"
+              title={meta.calibration_basis}
+            >
+              calibration: v{meta.calibration_version}
+            </span>
+          )}
         </footer>
       </article>
     </div>

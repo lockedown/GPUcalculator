@@ -41,6 +41,13 @@ BEGIN
         ALTER TABLE gpus ADD COLUMN nvlink_topology VARCHAR(20);
     END IF;
 
+    -- Add msrp_as_of column (sprint-v2.3 — date the catalogue MSRP was last
+    -- verified against a known-good source). ISO YYYY-MM-DD strings.
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                   WHERE table_name='gpus' AND column_name='msrp_as_of') THEN
+        ALTER TABLE gpus ADD COLUMN msrp_as_of VARCHAR(20);
+    END IF;
+
     -- Add cooling_requirement column
     IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
                    WHERE table_name='gpus' AND column_name='cooling_requirement') THEN
@@ -109,6 +116,13 @@ UPDATE gpus SET nvlink_topology = 'nvswitch'       WHERE name IN ('H100 SXM5', '
 UPDATE gpus SET nvlink_topology = 'nvl_fabric'     WHERE name IN ('GB200 NVL72', 'GB300 NVL72');
 UPDATE gpus SET nvlink_topology = 'point_to_point' WHERE name IN ('MI300X', 'MI350X', 'MI355X');
 UPDATE gpus SET nvlink_topology = 'none'           WHERE name = 'RTX PRO 6000 BSE';
+
+-- Backfill msrp_as_of (sprint-v2.3). Stamp every catalogue price as of the
+-- last known refresh (2026-04-01 — matches the latest `price_history` entry
+-- across all GPUs). Operators running the v2.3 refresh script
+-- (`backend/scripts/update_gpu_prices.py`) will overwrite this with newer
+-- dates as fresh quarterly surveys come in.
+UPDATE gpus SET msrp_as_of = '2026-04-01';
 
 -- Insert availability data (all GPUs)
 INSERT INTO availability (gpu_id, lead_time_weeks, supply_status) 

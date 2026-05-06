@@ -30,6 +30,10 @@ export interface GPU {
   rack_gpu_count: number | null;
   rack_fabric_bw_tb_s: number | null;
   msrp_usd: number | null;
+  // ISO YYYY-MM-DD when ``msrp_usd`` was last verified against a known-good
+  // source (NVIDIA / AMD official MSRPs, UBS / SemiAnalysis channel surveys).
+  // null on legacy rows that pre-date the freshness-stamp rollout.
+  msrp_as_of: string | null;
   is_estimated: boolean;
   release_date: string | null;
   verdict: string | null;
