@@ -119,6 +119,14 @@ export default function HardwareClient({ initialGpus }: Props) {
                 {gpu.msrp_usd && (
                   <span className="font-mono text-[11px] text-gray-600">
                     ~${gpu.msrp_usd.toLocaleString()}/GPU
+                    {gpu.msrp_as_of && (
+                      <span
+                        className="ml-1 text-[9px] text-gray-400"
+                        title={`Price last verified ${gpu.msrp_as_of}`}
+                      >
+                        (as of {gpu.msrp_as_of})
+                      </span>
+                    )}
                   </span>
                 )}
                 {gpu.release_date && (

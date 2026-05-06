@@ -49,3 +49,16 @@ async def health():
         return {"status": "ok", "db": "connected"}
     except Exception as e:
         return {"status": "degraded", "db": str(e)}
+
+
+@app.get(f"{settings.API_V1_PREFIX}/meta")
+async def meta():
+    """Engine versioning metadata — surfaced on the methodology page so users
+    can tell at a glance which calibration anchor and pricing snapshot the
+    current results are computed against.
+    """
+    from app.engine.calibration import CALIBRATION_VERSION
+    return {
+        "calibration_version": CALIBRATION_VERSION,
+        "calibration_basis": "Llama-3-70B FP16 — MLPerf / vLLM / NVIDIA published results",
+    }

@@ -9,6 +9,7 @@ boosts that performance.py already encodes via bytes-per-param.
 import pytest
 
 from app.engine.calibration import (
+    CALIBRATION_VERSION,
     calibrate_decode,
     calibrate_prefill,
     get_decode_factor,
@@ -17,6 +18,78 @@ from app.engine.calibration import (
     REFERENCE_DECODE,
     REFERENCE_PREFILL,
 )
+
+
+# ---------------------------------------------------------------------------
+# Drift snapshot — frozen copy of REFERENCE_DECODE / REFERENCE_PREFILL as of
+# CALIBRATION_VERSION above. The test below pins the live tables to these
+# values; if you intentionally refresh the calibration anchors against a new
+# benchmark snapshot, bump CALIBRATION_VERSION *and* update both snapshots
+# below in the same commit. The two-step lockstep is the whole point — it
+# makes silent drift impossible.
+# ---------------------------------------------------------------------------
+_REFERENCE_DECODE_SNAPSHOT_2026_04_15: dict[str, float] = {
+    "H100 SXM5": 40.0,
+    "H200 SXM": 55.0,
+    "B200 HGX": 115.0,
+    "B300 HGX": 170.0,
+    "GB200 NVL72": 200.0,
+    "GB300 NVL72": 280.0,
+    "RTX PRO 6000 BSE": 32.0,
+    "MI300X": 70.0,
+    "MI350X": 100.0,
+    "MI355X": 118.0,
+}
+
+_REFERENCE_PREFILL_SNAPSHOT_2026_04_15: dict[str, float] = {
+    "H100 SXM5": 14_000.0,
+    "H200 SXM": 20_000.0,
+    "B200 HGX": 45_000.0,
+    "B300 HGX": 70_000.0,
+    "GB200 NVL72": 82_000.0,
+    "GB300 NVL72": 130_000.0,
+    "RTX PRO 6000 BSE": 8_000.0,
+    "MI300X": 22_000.0,
+    "MI350X": 38_000.0,
+    "MI355X": 46_000.0,
+}
+
+
+class TestCalibrationFreshness:
+    """Lock down the calibration table against silent drift. Together with
+    CALIBRATION_VERSION bumps, this enforces a "version + values move together"
+    invariant whenever the benchmark anchors are refreshed.
+    """
+
+    def test_calibration_version_is_iso_date(self):
+        assert isinstance(CALIBRATION_VERSION, str)
+        assert len(CALIBRATION_VERSION) == 10
+        assert CALIBRATION_VERSION[4] == "-" and CALIBRATION_VERSION[7] == "-"
+
+    def test_reference_decode_matches_snapshot(self):
+        # When updating the calibration anchors against fresh MLPerf / vLLM /
+        # NVIDIA benchmark data, edit BOTH the live table in calibration.py AND
+        # the matching snapshot above, AND bump CALIBRATION_VERSION. A drift
+        # without those three things in lockstep is exactly what this test
+        # catches.
+        assert REFERENCE_DECODE == _REFERENCE_DECODE_SNAPSHOT_2026_04_15, (
+            "REFERENCE_DECODE drifted from the snapshot. If this is intentional, "
+            "update _REFERENCE_DECODE_SNAPSHOT_2026_04_15 (rename to today's "
+            "date) and bump CALIBRATION_VERSION in calibration.py."
+        )
+
+    def test_reference_prefill_matches_snapshot(self):
+        assert REFERENCE_PREFILL == _REFERENCE_PREFILL_SNAPSHOT_2026_04_15, (
+            "REFERENCE_PREFILL drifted from the snapshot. Same drill: update "
+            "the snapshot + CALIBRATION_VERSION together."
+        )
+
+    def test_snapshot_covers_all_seeded_gpus(self):
+        # Sanity check that the snapshot didn't lose a GPU when calibration
+        # was extended for a new SKU (which would be a drift in the other
+        # direction — silent under-coverage).
+        assert set(_REFERENCE_DECODE_SNAPSHOT_2026_04_15) == set(REFERENCE_DECODE)
+        assert set(_REFERENCE_PREFILL_SNAPSHOT_2026_04_15) == set(REFERENCE_PREFILL)
 
 
 class TestCalibration:

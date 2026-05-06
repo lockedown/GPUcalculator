@@ -18,6 +18,16 @@ Reference values (from `Finance GPU Benchmark Matrix.html`, Llama3-70B FP16):
 
 from __future__ import annotations
 
+# Date the reference numbers below were last verified against fresh public
+# benchmark snapshots (MLPerf, vLLM, NVIDIA / AMD product pages).  Surfaced on
+# the methodology page so users can tell at a glance whether the calibration
+# anchors are current; bumped any time the values change.
+#
+# The `tests/test_calibration.py::test_reference_snapshot_unchanged` smoke
+# test holds REFERENCE_DECODE and REFERENCE_PREFILL pinned to the snapshot
+# below — bump the version + snapshot together when refreshing.
+CALIBRATION_VERSION = "2026-04-15"
+
 # Ground-truth decode tok/s for Llama3-70B FP16 (batch=1, single GPU / rack unit)
 REFERENCE_DECODE: dict[str, float] = {
     "H100 SXM5": 40.0,

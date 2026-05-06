@@ -165,7 +165,12 @@ export default function GPUDeepDivePage() {
         <StatCard icon={<Layers className="h-4 w-4" />} label="BF16" value={gpu.bf16_tflops ? `${formatNumber(gpu.bf16_tflops)} TF` : "—"} />
         <StatCard icon={<Layers className="h-4 w-4" />} label="FP8" value={gpu.fp8_tflops ? `${formatNumber(gpu.fp8_tflops)} TF` : "N/A"} />
         <StatCard icon={<Zap className="h-4 w-4" />} label="TDP" value={gpu.tdp_watts ? `${gpu.tdp_watts}W` : "—"} />
-        <StatCard icon={<DollarSign className="h-4 w-4" />} label="MSRP" value={gpu.msrp_usd ? `$${gpu.msrp_usd.toLocaleString()}` : "—"} />
+        <StatCard
+          icon={<DollarSign className="h-4 w-4" />}
+          label="MSRP"
+          value={gpu.msrp_usd ? `$${gpu.msrp_usd.toLocaleString()}` : "—"}
+          sub={gpu.msrp_as_of ? `as of ${gpu.msrp_as_of}` : ""}
+        />
       </div>
 
       {/* Main content grid */}

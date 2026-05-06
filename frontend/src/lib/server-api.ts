@@ -22,3 +22,21 @@ export async function fetchAllBenchmarks(): Promise<BenchmarkWithGPU[]> {
   if (!res.ok) return [];
   return res.json();
 }
+
+export interface EngineMeta {
+  calibration_version: string;
+  calibration_basis: string;
+}
+
+/** Engine versioning metadata (calibration anchor freshness etc.). */
+export async function fetchEngineMeta(): Promise<EngineMeta | null> {
+  try {
+    const res = await fetch(`${API_BASE}/meta`, {
+      next: { revalidate: 300 },
+    });
+    if (!res.ok) return null;
+    return res.json();
+  } catch {
+    return null;
+  }
+}

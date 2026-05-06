@@ -23,6 +23,10 @@ class GPUBase(BaseModel):
     rack_gpu_count: int | None = None
     rack_fabric_bw_tb_s: float | None = None
     msrp_usd: float | None = None
+    # ISO YYYY-MM-DD when ``msrp_usd`` was last verified against a known-good
+    # source.  ``None`` means the catalogue value pre-dates the freshness-stamp
+    # rollout (sprint v2.3) and should be treated as "unknown vintage".
+    msrp_as_of: str | None = None
     is_estimated: bool = False
     release_date: str | None = None
     verdict: str | None = None

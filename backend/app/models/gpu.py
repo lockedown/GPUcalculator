@@ -62,6 +62,11 @@ class GPU(Base):
 
     # Pricing & Status
     msrp_usd = Column(Float)
+    # Date the msrp_usd value was last verified against a known-good source
+    # (NVIDIA / AMD official, UBS / SemiAnalysis channel survey, CBRE for
+    # facility costs).  ISO YYYY-MM-DD.  Surfaced in the dashboard so users
+    # can tell at a glance whether the catalogue price is current.
+    msrp_as_of = Column(String(20))
     is_estimated = Column(Boolean, default=False)
     release_date = Column(String(20))
 
