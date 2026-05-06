@@ -1,11 +1,14 @@
 # Roadmap
 
-Tracks where the GPU Deployment Optimizer is going. The current shipping
-version is **v2.1** — the API-review backlog (TTFT/TPOT, MoE routing,
-NVLink topology, MIG / Run:ai multi-tenancy, disaggregated prefill/decode)
-landed in v2.0, then got a code-quality cleanup pass in v2.1.
+Tracks where the GPU Deployment Optimizer is going.
 
-## v2.2 — sweet-spot fluency + customer fit
+**Current shipping version: v2.2.** The API-review backlog (TTFT/TPOT, MoE
+routing, NVLink topology, MIG / Run:ai multi-tenancy, disaggregated
+prefill/decode) landed in v2.0, then got a code-quality cleanup pass in
+v2.1, then customer-fit polish (sweet-spot explainer, workload templates,
+carbon cost, regional pricing, optimizer perf SLO) in v2.2.
+
+## v2.2 — sweet-spot fluency + customer fit (✅ shipped)
 
 Targets the gap between *"what does this dashboard tell me"* and *"what does
 my customer want to discuss in a 30-minute call?"*. Ordered roughly by ratio
@@ -30,6 +33,7 @@ Lower customer visibility but matters for the engine's credibility over time.
 | 8 | **Calibration freshness stamp** — `REFERENCE_DECODE` / `REFERENCE_PREFILL` are anchored to specific benchmark snapshots. Surface a "calibration version" + a smoke test that flags drift against a fresh snapshot. | The reference numbers will go stale; protect against silent drift. | M |
 | 9 | **Scheduled benchmark refresh** — cron that pulls latest MLPerf / vLLM / NVIDIA published results into the calibration table. | Tied to #8; blocked until that lands. | M |
 | 10 | **Reliability / spares model** — account for fault-tolerant capacity (e.g. +N% over baseline `gpu_count` for HA). | Real production deployments don't size to baseline; current numbers are slightly optimistic. | M |
+| 11 | **Price freshness + auto-refresh** — same pattern as #8 but for the pricing data. Adds an `msrp_as_of` date column to `gpus`, surfaces "Prices as of YYYY-MM-DD" on the comparison table + per-GPU detail page, and ships a refresh mechanism (small admin endpoint + scheduled cron) that pulls from known-good sources — NVIDIA / AMD official MSRPs, channel surveys (UBS, SemiAnalysis), CBRE colo rates, EPA eGRID grid intensity — and writes new `price_history` entries automatically. Today's MSRPs are static and unstamped: a customer reading "$30k" doesn't know whether that reflects 2024 launch, 2026 channel reality, or hand-wave estimate. | Pricing in this sector is moving 10-30% per year; without stamps + auto-refresh the dashboard's most-asked numbers will silently drift. Pairs with #7 (data must be in the canonical YAML so refresh has a structured target to write back to) and #8 (same staleness pattern, different data). | M |
 
 ## Deferred / parking lot
 
