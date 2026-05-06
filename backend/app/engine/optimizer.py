@@ -57,6 +57,8 @@ class Violation:
     MARGINAL_AIR_COOLING = "MARGINAL_AIR_COOLING"
     PRE_GA = "PRE_GA"
     TPOT_MISSED = "TPOT_MISSED"  # advisory: per-user TPOT exceeds target_tpot_ms
+    # Disaggregated serving (Sprint 10)
+    DISAGG_RECOMMENDED = "DISAGG_RECOMMENDED"  # advisory: workload would benefit from prefill/decode split
     # Multi-tenancy
     MIG_NOT_SUPPORTED = "MIG_NOT_SUPPORTED"        # hard: GPU cannot run MIG
     MIG_PROFILE_REQUIRED = "MIG_PROFILE_REQUIRED"  # hard: MIG mode but no/invalid profile
@@ -84,6 +86,63 @@ GPU_INTERCONNECT_TO_FABRIC: dict[str, str] = {
     "IF v3": "RoCEv2",
     "IF v4": "RoCEv2",
 }
+
+
+# ---------------------------------------------------------------------------
+# Disaggregated prefill/decode split (Sprint 10 — observability v1)
+# ---------------------------------------------------------------------------
+# Default Dynamo / DeepSeek-V3 split — observed to land near 30% prefill / 70%
+# decode for chat-style traffic. Long-prompt or RAG workloads tilt toward 50/50;
+# v2 will compute the optimal ratio from prefill/decode demand. v1 uses the
+# fixed default and surfaces it as a recommendation.
+DISAGG_PREFILL_SHARE = 0.30
+
+# Heuristic: emit DISAGG_RECOMMENDED in colocated mode when the workload is in
+# the regime where production deployments typically choose to disaggregate.
+# Both thresholds need to fire — concurrent_users alone is decode pressure;
+# context_length alone is prefill pressure; together they're the canonical
+# "split helps" signal.
+DISAGG_USERS_THRESHOLD = 32
+DISAGG_CONTEXT_THRESHOLD = 8192
+
+
+def _apply_serving_mode(topo: TopologyResult, serving_mode: str) -> TopologyResult:
+    """Populate prefill/decode role fields on a TopologyResult in place.
+
+    In 'colocated' mode both pools mirror the unified topology. In
+    'disaggregated' mode the GPU budget is split 30/70 (prefill/decode) as a
+    recommendation; cost + rack are still computed against ``topo.gpu_count``.
+    Returns the same TopologyResult for chaining.
+    """
+    topo.serving_mode = serving_mode
+    if serving_mode == "disaggregated" and topo.gpu_count >= 2:
+        prefill_n = max(1, round(topo.gpu_count * DISAGG_PREFILL_SHARE))
+        decode_n = max(1, topo.gpu_count - prefill_n)
+        topo.prefill_gpu_count = prefill_n
+        topo.decode_gpu_count = decode_n
+        topo.prefill_role_strategy = f"Prefill pool · {prefill_n}× GPU (compute-dense)"
+        topo.decode_role_strategy = f"Decode pool · {decode_n}× GPU (bandwidth-dense)"
+    else:
+        # Colocated, or disagg with too few GPUs to split meaningfully — mirror.
+        topo.prefill_gpu_count = topo.gpu_count
+        topo.decode_gpu_count = topo.gpu_count
+        topo.prefill_role_strategy = topo.parallelism_strategy
+        topo.decode_role_strategy = topo.parallelism_strategy
+    return topo
+
+
+def _should_recommend_disagg(workload: WorkloadInput) -> bool:
+    """True when the workload sits in the disaggregation sweet spot.
+
+    Disaggregation is operationally heavy (separate KV transfer, two pools to
+    schedule), so the advisory only fires when both prefill cost (long context)
+    and decode pressure (many concurrent users) are present. This matches the
+    public Dynamo / DeepSeek-V3 deployment pattern.
+    """
+    return (
+        workload.concurrent_users >= DISAGG_USERS_THRESHOLD
+        and workload.context_length >= DISAGG_CONTEXT_THRESHOLD
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -479,6 +538,17 @@ def evaluate_gpu(
         kv_per_user_gb=kv_per_user,
         per_gpu_decode_tps=calibrated_single_decode,
     )
+
+    # Disaggregated prefill/decode view — mirrors in colocated mode, splits
+    # 30/70 in disaggregated mode. Sizing/cost are unchanged either way.
+    _apply_serving_mode(topo, workload.serving_mode)
+    if workload.serving_mode == "colocated" and _should_recommend_disagg(workload):
+        warnings.append(
+            "Workload may benefit from disaggregated prefill/decode "
+            f"({workload.concurrent_users} users × {workload.context_length} ctx — "
+            "Dynamo / DeepSeek-V3 regime)"
+        )
+        codes.append(Violation.DISAGG_RECOMMENDED)
 
     # --- Performance: recalculate per-replica metrics with actual GPU count ---
     # Each DP replica handles a fraction of the concurrent sequences.

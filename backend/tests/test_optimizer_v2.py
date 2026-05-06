@@ -1003,6 +1003,76 @@ class TestMoERoutingOverhead:
 
 
 # ===========================================================================
+# 8f. DISAGGREGATED PREFILL/DECODE (Sprint 10 — observability v1)
+# ===========================================================================
+class TestDisaggregation:
+    def test_colocated_is_default(self, db):
+        gpu = db.query(GPU).filter(GPU.name == "H200 SXM").first()
+        r = evaluate_gpu(db, gpu, WorkloadInput(model_params_b=70), ConstraintInput())
+        assert r.topology.serving_mode == "colocated"
+        assert r.topology.prefill_gpu_count == r.topology.gpu_count
+        assert r.topology.decode_gpu_count == r.topology.gpu_count
+        assert r.topology.prefill_role_strategy == r.topology.parallelism_strategy
+        assert r.topology.decode_role_strategy == r.topology.parallelism_strategy
+
+    def test_disaggregated_splits_30_70(self, db):
+        # 405B FP16 forces a multi-GPU topology so the split has room to breathe.
+        gpu = db.query(GPU).filter(GPU.name == "H200 SXM").first()
+        w = WorkloadInput(model_params_b=405, precision="FP16", serving_mode="disaggregated")
+        r = evaluate_gpu(db, gpu, w, ConstraintInput())
+        assert r.topology.serving_mode == "disaggregated"
+        assert r.topology.prefill_gpu_count >= 1
+        assert r.topology.decode_gpu_count >= 1
+        assert r.topology.prefill_gpu_count + r.topology.decode_gpu_count == r.topology.gpu_count
+        # Decode pool should be the larger half — Dynamo split direction.
+        assert r.topology.decode_gpu_count >= r.topology.prefill_gpu_count
+        assert "compute-dense" in r.topology.prefill_role_strategy
+        assert "bandwidth-dense" in r.topology.decode_role_strategy
+
+    def test_disaggregated_single_gpu_mirrors(self, db):
+        # gpu_count=1 → split is meaningless; mirror rather than emit prefill=0.
+        gpu = db.query(GPU).filter(GPU.name == "H200 SXM").first()
+        w = WorkloadInput(model_params_b=7, precision="FP8", serving_mode="disaggregated")
+        r = evaluate_gpu(db, gpu, w, ConstraintInput())
+        if r.topology.gpu_count == 1:
+            assert r.topology.prefill_gpu_count == 1
+            assert r.topology.decode_gpu_count == 1
+
+    def test_disagg_recommended_fires_on_high_concurrency_long_context(self, db):
+        # 50 users × 16K context — well past both thresholds.
+        gpu = db.query(GPU).filter(GPU.name == "H200 SXM").first()
+        w = WorkloadInput(model_params_b=70, concurrent_users=50, context_length=16384)
+        r = evaluate_gpu(db, gpu, w, ConstraintInput())
+        assert "DISAGG_RECOMMENDED" in r.violation_codes
+
+    def test_disagg_recommended_silent_on_low_concurrency(self, db):
+        gpu = db.query(GPU).filter(GPU.name == "H200 SXM").first()
+        w = WorkloadInput(model_params_b=70, concurrent_users=1, context_length=4096)
+        r = evaluate_gpu(db, gpu, w, ConstraintInput())
+        assert "DISAGG_RECOMMENDED" not in r.violation_codes
+
+    def test_disagg_recommended_silent_on_short_context(self, db):
+        gpu = db.query(GPU).filter(GPU.name == "H200 SXM").first()
+        w = WorkloadInput(model_params_b=70, concurrent_users=100, context_length=2048)
+        r = evaluate_gpu(db, gpu, w, ConstraintInput())
+        assert "DISAGG_RECOMMENDED" not in r.violation_codes
+
+    def test_disagg_recommended_silent_when_already_disagg(self, db):
+        # If user has already opted in, don't nag.
+        gpu = db.query(GPU).filter(GPU.name == "H200 SXM").first()
+        w = WorkloadInput(
+            model_params_b=70, concurrent_users=50, context_length=16384,
+            serving_mode="disaggregated",
+        )
+        r = evaluate_gpu(db, gpu, w, ConstraintInput())
+        assert "DISAGG_RECOMMENDED" not in r.violation_codes
+
+    def test_disagg_advisory_does_not_gate_ranking(self):
+        from app.engine.optimizer import HARD_VIOLATION_CODES
+        assert "DISAGG_RECOMMENDED" not in HARD_VIOLATION_CODES
+
+
+# ===========================================================================
 # 9. RUN_COMPARISON (full pipeline)
 # ===========================================================================
 class TestRunComparison:

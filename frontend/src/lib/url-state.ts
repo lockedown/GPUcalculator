@@ -26,6 +26,7 @@ const DEFAULT_WORKLOAD: WorkloadInput = {
   multi_tenancy_mode: "dedicated",
   mig_profile: null,
   tenants: 1,
+  serving_mode: "colocated",
 };
 
 const DEFAULT_CONSTRAINTS: ConstraintInput = {
@@ -142,6 +143,7 @@ export function decodeParamsToState(
     "finance_benchmark_category",
     "multi_tenancy_mode",
     "mig_profile",
+    "serving_mode",
   ] as const) {
     const v = params.get(key);
     if (v !== null) (workload as Record<string, unknown>)[key] = v;

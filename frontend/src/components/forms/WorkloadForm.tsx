@@ -7,8 +7,10 @@ import {
   BENCHMARK_CATEGORIES,
   MIG_PROFILE_OPTIONS,
   TENANCY_MODE_OPTIONS,
+  SERVING_MODE_OPTIONS,
   type MigProfile,
   type TenancyMode,
+  type ServingMode,
 } from "@/types";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { NumericInput } from "@/components/ui/numeric-input";
@@ -304,6 +306,39 @@ export default function WorkloadForm() {
               {workload.multi_tenancy_mode === "mig"
                 ? "Sizing one tenant on one MIG slice. GPUs that don't support MIG (Blackwell, AMD, RTX) are filtered out with MIG_NOT_SUPPORTED."
                 : `Each of ${workload.tenants} tenants gets aggregate ÷ ${workload.tenants} throughput. NVLink stays available, all memory accessible.`}
+            </span>
+          )}
+        </div>
+
+        {/* Serving mode (prefill / decode disaggregation) */}
+        <div className="mt-4 flex flex-wrap items-end gap-4">
+          <div className="flex flex-col gap-1.5">
+            <FieldLabel
+              label="Serving Mode"
+              tooltip={
+                <>
+                  <strong>Colocated</strong> = one GPU pool runs both prefill and decode (the default and most deployments). <strong>Disaggregated</strong> = separate pools per role, à la NVIDIA Dynamo / DeepSeek-V3 — prefill goes to compute-dense nodes, decode to bandwidth-dense nodes. v1 is observability-only: the recommended split is shown alongside the topology, cost / rack are still computed against the unified GPU count. Mostly worth it once you&apos;re deep in the production-inference regime (high concurrent users + long context).
+                </>
+              }
+            />
+            <Select
+              value={workload.serving_mode}
+              onValueChange={(v) => setWorkload({ serving_mode: v as ServingMode })}
+            >
+              <SelectTrigger className="min-w-[24rem]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {SERVING_MODE_OPTIONS.map((m) => (
+                  <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          {workload.serving_mode === "disaggregated" && (
+            <span className="text-[10px] text-gray-400 pb-2 max-w-md">
+              Showing a recommended 30/70 prefill/decode split as a hint. Sizing &amp; cost are still
+              computed against the unified GPU count — heterogeneous SKUs per role land in v2.
             </span>
           )}
         </div>

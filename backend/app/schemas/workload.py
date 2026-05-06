@@ -42,6 +42,18 @@ class WorkloadInput(BaseModel):
             "instances_per_gpu."
         ),
     )
+    # ---- Disaggregated prefill/decode (Dynamo-style) ----
+    serving_mode: str = Field(
+        "colocated",
+        description=(
+            "'colocated' = one GPU pool runs both prefill and decode (current "
+            "default). 'disaggregated' = roles split into separate pools (Dynamo, "
+            "DeepSeek-V3 architecture). v1 is observability-only — sizing is "
+            "informational, the recommended split is rendered alongside the "
+            "topology but cost / rack are still computed against the unified "
+            "gpu_count. Heterogeneous SKUs per role land in v2."
+        ),
+    )
 
 
 class ConstraintInput(BaseModel):
@@ -91,6 +103,16 @@ class TopologyResult(BaseModel):
     dp_degree: int = 1
     effective_bandwidth_gb_s: float | None = None
     cross_node_latency_penalty: float = 0.0
+    # Disaggregated prefill/decode view (Sprint 10 — observability v1).
+    # In 'colocated' mode prefill_gpu_count == decode_gpu_count == gpu_count
+    # and the role strategies mirror parallelism_strategy. In 'disaggregated'
+    # mode the engine surfaces a recommended 30/70 prefill/decode split as a
+    # hint; cost + rack are still computed against the unified gpu_count.
+    serving_mode: str = "colocated"
+    prefill_gpu_count: int | None = None
+    decode_gpu_count: int | None = None
+    prefill_role_strategy: str | None = None
+    decode_role_strategy: str | None = None
 
 
 class RackPlanResult(BaseModel):

@@ -34,6 +34,7 @@ const CODE_LABELS: Record<string, { label: string; tone: "warn" | "info" }> = {
   TPOT_MISSED: { label: "TPOT target missed", tone: "warn" },
   MIG_NVLINK_DISABLED: { label: "NVLink disabled (MIG)", tone: "info" },
   RUNAI_TIME_SLICED: { label: "Time-sliced (Run:ai)", tone: "info" },
+  DISAGG_RECOMMENDED: { label: "Disaggregation recommended", tone: "info" },
 };
 
 export default function SweetSpotDetail({ result, loading }: Props) {
@@ -122,6 +123,20 @@ export default function SweetSpotDetail({ result, loading }: Props) {
               value={`-${(t.cross_node_latency_penalty * 100).toFixed(0)}%`}
               valueClass="text-amber-600"
             />
+          )}
+          {t && t.serving_mode === "disaggregated" && (
+            <>
+              <Row
+                label="↳ Prefill pool"
+                value={`${t.prefill_gpu_count}× GPU`}
+                valueClass="text-blue-700"
+              />
+              <Row
+                label="↳ Decode pool"
+                value={`${t.decode_gpu_count}× GPU`}
+                valueClass="text-emerald-700"
+              />
+            </>
           )}
         </Section>
 

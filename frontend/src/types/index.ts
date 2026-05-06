@@ -85,7 +85,16 @@ export interface WorkloadInput {
   multi_tenancy_mode: TenancyMode;
   mig_profile: MigProfile | null;
   tenants: number;
+  // Disaggregated prefill/decode (Sprint 10 — observability v1).
+  serving_mode: ServingMode;
 }
+
+export type ServingMode = "colocated" | "disaggregated";
+
+export const SERVING_MODE_OPTIONS: { value: ServingMode; label: string }[] = [
+  { value: "colocated", label: "Colocated (one pool runs prefill + decode)" },
+  { value: "disaggregated", label: "Disaggregated (separate prefill / decode pools — Dynamo)" },
+];
 
 export type TenancyMode = "dedicated" | "mig" | "runai_fractional";
 export type MigProfile = "1g.10gb" | "2g.20gb" | "3g.40gb" | "4g.40gb" | "7g.full";
@@ -160,6 +169,12 @@ export interface TopologyResult {
   dp_degree: number;
   effective_bandwidth_gb_s: number | null;
   cross_node_latency_penalty: number;
+  // Disaggregated prefill/decode view. Mirrors gpu_count in colocated mode.
+  serving_mode: ServingMode;
+  prefill_gpu_count: number | null;
+  decode_gpu_count: number | null;
+  prefill_role_strategy: string | null;
+  decode_role_strategy: string | null;
 }
 
 export interface RackPlanResult {
