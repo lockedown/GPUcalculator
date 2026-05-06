@@ -79,6 +79,15 @@ class ConstraintInput(BaseModel):
         1000.0,
         description="Software licensing per GPU per year, USD (e.g. NVIDIA AI Enterprise list ~$1000/GPU/yr).",
     )
+    grid_carbon_intensity_g_kwh: float = Field(
+        380.0,
+        description=(
+            "Grid carbon intensity (g CO₂e per kWh). Used to compute "
+            "carbon_kg_per_year. Default 380 g/kWh = US-East (PJM, EPA "
+            "eGRID 2024). The frontend Region picker swaps this for "
+            "US-West (~250), EU (~270), APAC (~550)."
+        ),
+    )
     metric_weights: dict[str, float] = Field(
         default={"performance": 0.35, "cost": 0.30, "complexity": 0.15, "availability": 0.20},
         description="Weights for each metric (should sum to 1.0)",
@@ -173,6 +182,9 @@ class GPUResult(BaseModel):
     tco_usd: float | None = None
     capex_usd: float | None = None
     opex_monthly_usd: float | None = None
+    # Annual operating-emissions estimate (kg CO₂-equivalent per year) at the
+    # configured grid intensity. PUE-adjusted so cooling overhead is included.
+    carbon_kg_per_year: float | None = None
     # Itemised monthly OpEx: keys are power_usd, colocation_usd,
     # hw_support_usd, software_usd. None when calc skipped.
     opex_breakdown: dict[str, float] | None = None
@@ -196,3 +208,7 @@ class ComparisonResponse(BaseModel):
     constraints: ConstraintInput
     results: list[GPUResult]
     sweet_spot_gpu: str | None = None
+    # Up to 3 short, customer-readable reasons explaining why ``sweet_spot_gpu``
+    # was chosen (best tokens/$, lowest TTFT, only one passing all hard
+    # constraints, etc.). Empty list when no GPUs were evaluated.
+    sweet_spot_reasons: list[str] = []

@@ -35,6 +35,13 @@ DEFAULT_HW_SUPPORT_PCT_OF_CAPEX_PER_YEAR = 0.10
 # (5-year term included free with H100/H200; charged separately for others).
 DEFAULT_SOFTWARE_USD_PER_GPU_PER_YEAR = 1000.0
 
+# Grid carbon intensity (gCO₂e per kWh).  Defaults to a US-East-ish blend
+# from EPA eGRID 2024 (PJM region ~380 g/kWh).  The frontend region picker
+# overrides this for US-West / EU / APAC.  Used to compute carbon_kg_per_year
+# alongside the existing power line of OpEx.
+DEFAULT_GRID_CARBON_INTENSITY_G_KWH = 380.0
+HOURS_PER_YEAR = 8760
+
 
 @dataclass
 class CostResult:
@@ -45,6 +52,10 @@ class CostResult:
     tco_36m_usd: float
     tokens_per_usd_per_month: float
     power_kw: float
+    # Annual operating-emissions estimate (kg CO₂-equivalent per year) at the
+    # configured grid intensity.  Includes PUE losses (cooling overhead is
+    # part of the facility draw).
+    carbon_kg_per_year: float
 
 
 def calc_tco(
@@ -61,6 +72,7 @@ def calc_tco(
     colo_usd_per_kw_per_month: float = DEFAULT_COLO_USD_PER_KW_PER_MONTH,
     hw_support_pct_of_capex_per_year: float = DEFAULT_HW_SUPPORT_PCT_OF_CAPEX_PER_YEAR,
     software_usd_per_gpu_per_year: float = DEFAULT_SOFTWARE_USD_PER_GPU_PER_YEAR,
+    grid_carbon_intensity_g_kwh: float = DEFAULT_GRID_CARBON_INTENSITY_G_KWH,
 ) -> CostResult:
     """Calculate Total Cost of Ownership in USD.
 
@@ -133,6 +145,13 @@ def calc_tco(
     monthly_cost = tco / amortization_months
     tokens_per_usd = tokens_per_month / monthly_cost if monthly_cost > 0 else 0
 
+    # Carbon — facility power × grid intensity. PUE is already baked into
+    # effective_power_kw above, so we use that (cooling overhead is real
+    # emissions, not just billing).
+    carbon_kg_per_year = (
+        effective_power_kw * HOURS_PER_YEAR * grid_carbon_intensity_g_kwh / 1000.0
+    )
+
     return CostResult(
         capex_usd=capex_usd,
         opex_monthly_usd=opex_monthly,
@@ -140,6 +159,7 @@ def calc_tco(
         tco_36m_usd=tco,
         tokens_per_usd_per_month=tokens_per_usd,
         power_kw=total_power_kw,
+        carbon_kg_per_year=carbon_kg_per_year,
     )
 
 

@@ -12,9 +12,11 @@ import {
   type TenancyMode,
   type ServingMode,
 } from "@/types";
+import { WORKLOAD_TEMPLATES } from "@/lib/workload-templates";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { NumericInput } from "@/components/ui/numeric-input";
 import { InfoTooltip } from "@/components/ui/info-tooltip";
+import { Button } from "@/components/ui/button";
 import {
   Select,
   SelectTrigger,
@@ -22,7 +24,7 @@ import {
   SelectContent,
   SelectItem,
 } from "@/components/ui/select";
-import { Loader2 } from "lucide-react";
+import { Loader2, Sparkles } from "lucide-react";
 
 // Reusable label-with-tooltip — keeps the JSX below tidy.
 function FieldLabel({
@@ -53,7 +55,7 @@ const CONTEXT_OPTIONS = [
 ];
 
 export default function WorkloadForm() {
-  const { workload, setWorkload, loading } = useStore();
+  const { workload, setWorkload, setConstraints, loading } = useStore();
 
   return (
     <Card>
@@ -64,6 +66,29 @@ export default function WorkloadForm() {
         </CardTitle>
       </CardHeader>
       <CardContent>
+        {/* Template buttons — fill the form with a sensible starting point.
+            Renders as a compact pill row above the inputs. */}
+        <div className="mb-4 flex flex-wrap items-center gap-2">
+          <span className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-widest text-gray-500">
+            <Sparkles className="h-3 w-3" /> Templates
+          </span>
+          {WORKLOAD_TEMPLATES.map((tpl) => (
+            <Button
+              key={tpl.id}
+              variant="outline"
+              size="sm"
+              className="h-7 text-[10px] font-medium"
+              title={tpl.blurb}
+              onClick={() => {
+                setWorkload(tpl.workload);
+                if (tpl.constraints) setConstraints(tpl.constraints);
+              }}
+            >
+              {tpl.label}
+            </Button>
+          ))}
+        </div>
+
         <div className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-6">
           {/* Model Size */}
           <div className="flex flex-col gap-1.5">

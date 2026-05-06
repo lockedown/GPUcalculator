@@ -524,6 +524,118 @@ class TestRunComparison:
 
 
 # ===========================================================================
+# SWEET-SPOT EXPLAINER (Sprint v2.2 — surface why a GPU was picked)
+# ===========================================================================
+class TestSweetSpotExplainer:
+    def test_reasons_populated_when_sweet_spot_exists(self, db):
+        resp = run_comparison(db, WorkloadInput(model_params_b=70), ConstraintInput())
+        assert resp.sweet_spot_gpu is not None
+        assert isinstance(resp.sweet_spot_reasons, list)
+        assert 1 <= len(resp.sweet_spot_reasons) <= 3
+        assert all(isinstance(r, str) and r.strip() for r in resp.sweet_spot_reasons)
+
+    def test_best_tokens_per_dollar_surfaces(self, db):
+        # Cost-weighted pick should mention tokens/$/mo dominance somewhere.
+        resp = run_comparison(
+            db,
+            WorkloadInput(model_params_b=70, precision="FP8"),
+            ConstraintInput(metric_weights={
+                "performance": 0.10, "cost": 0.70,
+                "complexity": 0.10, "availability": 0.10,
+            }),
+        )
+        # The pick should be the GPU that maximises tokens/$/mo OR a clear
+        # cost-axis winner; either way the reason text should land cleanly.
+        assert resp.sweet_spot_reasons
+        # First reason should contain a recognisable axis label.
+        joined = " | ".join(resp.sweet_spot_reasons).lower()
+        assert any(
+            phrase in joined
+            for phrase in ["tokens/$", "cost score", "composite score", "passing all"]
+        )
+
+    def test_only_passing_candidate_surfaces(self, db):
+        # An impossibly low budget filters out everyone except… probably
+        # nothing, in which case the response falls back to "highest
+        # composite". We just check the explainer produces *something*.
+        resp = run_comparison(
+            db,
+            WorkloadInput(model_params_b=70),
+            ConstraintInput(max_budget_usd=10),  # absurdly low
+        )
+        assert resp.sweet_spot_reasons  # always at least one fallback reason
+
+    def test_reasons_are_capped_at_three(self, db):
+        # Even on a workload where multiple axes strongly favour the same GPU
+        # (e.g. a cheap, fast, available GPU), reasons must stay <= 3.
+        resp = run_comparison(db, WorkloadInput(model_params_b=7), ConstraintInput())
+        assert len(resp.sweet_spot_reasons) <= 3
+
+
+# ===========================================================================
+# OPTIMIZER PERFORMANCE SLO (Sprint v2.2 — guard the dev loop)
+# ===========================================================================
+class TestOptimizerPerformance:
+    """Lock in a budget on the headline ``run_comparison`` call. The 10-GPU
+    catalogue is the production payload; if a future sprint regresses this
+    materially the live API and dashboard responsiveness suffer.
+
+    Budget: 100 ms wall-clock against the seeded SQLite test DB. Current
+    measurement is ~5-15 ms so we have ~7-20× headroom; this catches
+    catastrophic regressions, not micro-tuning.
+    """
+
+    PERF_SLO_MS = 100
+
+    def test_run_comparison_under_slo(self, db):
+        import time
+
+        # Warm any module-level caches (calibration table, model_arch lookup).
+        run_comparison(db, WorkloadInput(model_params_b=70), ConstraintInput())
+
+        # Take the median of 5 runs to dampen scheduler jitter on noisy CI.
+        timings = []
+        for _ in range(5):
+            start = time.perf_counter()
+            run_comparison(db, WorkloadInput(model_params_b=70), ConstraintInput())
+            timings.append((time.perf_counter() - start) * 1000)
+        timings.sort()
+        median_ms = timings[len(timings) // 2]
+        assert median_ms < self.PERF_SLO_MS, (
+            f"run_comparison median {median_ms:.1f}ms exceeds {self.PERF_SLO_MS}ms SLO; "
+            f"timings: {[f'{t:.1f}' for t in timings]}"
+        )
+
+    def test_run_comparison_under_slo_with_all_features(self, db):
+        """Same SLO applies when all the v2.0 feature axes are exercised
+        simultaneously (MoE + multi-tenancy + disaggregation + tight TPOT).
+        Catches O(n²) scaling in any one feature.
+        """
+        import time
+
+        w = WorkloadInput(
+            model_params_b=405, precision="FP8", concurrent_users=50, context_length=16384,
+            is_moe=True, num_experts=8, active_experts=2,
+            multi_tenancy_mode="runai_fractional", tenants=4,
+            serving_mode="disaggregated",
+        )
+        c = ConstraintInput(target_tpot_ms=50)
+
+        run_comparison(db, w, c)  # warm-up
+        timings = []
+        for _ in range(5):
+            start = time.perf_counter()
+            run_comparison(db, w, c)
+            timings.append((time.perf_counter() - start) * 1000)
+        timings.sort()
+        median_ms = timings[len(timings) // 2]
+        assert median_ms < self.PERF_SLO_MS, (
+            f"feature-heavy run_comparison median {median_ms:.1f}ms exceeds "
+            f"{self.PERF_SLO_MS}ms SLO; timings: {[f'{t:.1f}' for t in timings]}"
+        )
+
+
+# ===========================================================================
 # COST ENGINE
 # ===========================================================================
 class TestCostEngine:

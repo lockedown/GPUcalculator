@@ -48,6 +48,7 @@ export function encodeStateToParams(
     "hw_support_pct_of_capex_per_year",
     "software_usd_per_gpu_per_year",
     "target_tpot_ms",
+    "grid_carbon_intensity_g_kwh",
   ];
   for (const key of flatConstraintKeys) {
     const v = constraints[key];
@@ -128,6 +129,7 @@ export function decodeParamsToState(
     "hw_support_pct_of_capex_per_year",
     "software_usd_per_gpu_per_year",
     "target_tpot_ms",
+    "grid_carbon_intensity_g_kwh",
   ];
   for (const key of numericConstraints) {
     const v = params.get(key);

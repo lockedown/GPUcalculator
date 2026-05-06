@@ -34,6 +34,7 @@ const COLUMNS: Column[] = [
   { header: "TCO (USD)", value: (r) => r.tco_usd?.toFixed(0) ?? "" },
   { header: "CapEx (USD)", value: (r) => r.capex_usd?.toFixed(0) ?? "" },
   { header: "OpEx/mo (USD)", value: (r) => r.opex_monthly_usd?.toFixed(0) ?? "" },
+  { header: "Carbon kg/yr", value: (r) => r.carbon_kg_per_year?.toFixed(0) ?? "" },
   { header: "Tokens/USD/mo", value: (r) => r.tokens_per_usd?.toFixed(0) ?? "" },
   { header: "Complexity", value: (r) => r.complexity_score?.toFixed(2) ?? "" },
   { header: "Availability", value: (r) => r.availability_score?.toFixed(2) ?? "" },

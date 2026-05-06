@@ -232,7 +232,11 @@ export default function Dashboard() {
           <BubbleScatter results={results} width={780} height={460} />
         </div>
         <div className="print-break-avoid">
-          <SweetSpotDetail result={sweetSpot} loading={loading && !sweetSpot} />
+          <SweetSpotDetail
+            result={sweetSpot}
+            reasons={comparison?.sweet_spot_reasons ?? []}
+            loading={loading && !sweetSpot}
+          />
         </div>
       </div>
 
