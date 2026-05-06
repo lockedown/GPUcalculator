@@ -26,13 +26,15 @@ from app.schemas.workload import (
     RackPlanResult,
     ComparisonResponse,
 )
-from app.engine.performance import calculate_performance, calc_concurrent_users_support, calc_kv_cache_per_user_gb
+from app.engine.performance import calculate_performance, calc_kv_cache_per_user_gb
 from app.engine.cost import calc_tco, calc_network_cost
 from app.engine.complexity import calc_complexity
 from app.engine.availability import calc_availability
 from app.engine.calibration import calibrate_decode, calibrate_prefill
 from app.engine.rack_planner import plan_rack_layout
 from app.engine.tenancy import apply_tenancy, TenancyGPUShim
+from app.engine.serving_mode import apply_serving_mode, should_recommend_disagg
+from app.engine.moe import routing_overhead as moe_routing_overhead
 
 # ---------------------------------------------------------------------------
 # Constraint violation penalty applied to composite score (0-1 scale)
@@ -86,90 +88,6 @@ GPU_INTERCONNECT_TO_FABRIC: dict[str, str] = {
     "IF v3": "RoCEv2",
     "IF v4": "RoCEv2",
 }
-
-
-# ---------------------------------------------------------------------------
-# Disaggregated prefill/decode split (Sprint 10 — observability v1)
-# ---------------------------------------------------------------------------
-# Default Dynamo / DeepSeek-V3 split — observed to land near 30% prefill / 70%
-# decode for chat-style traffic. Long-prompt or RAG workloads tilt toward 50/50;
-# v2 will compute the optimal ratio from prefill/decode demand. v1 uses the
-# fixed default and surfaces it as a recommendation.
-DISAGG_PREFILL_SHARE = 0.30
-
-# Heuristic: emit DISAGG_RECOMMENDED in colocated mode when the workload is in
-# the regime where production deployments typically choose to disaggregate.
-# Both thresholds need to fire — concurrent_users alone is decode pressure;
-# context_length alone is prefill pressure; together they're the canonical
-# "split helps" signal.
-DISAGG_USERS_THRESHOLD = 32
-DISAGG_CONTEXT_THRESHOLD = 8192
-
-
-def _apply_serving_mode(topo: TopologyResult, serving_mode: str) -> TopologyResult:
-    """Populate prefill/decode role fields on a TopologyResult in place.
-
-    In 'colocated' mode both pools mirror the unified topology. In
-    'disaggregated' mode the GPU budget is split 30/70 (prefill/decode) as a
-    recommendation; cost + rack are still computed against ``topo.gpu_count``.
-    Returns the same TopologyResult for chaining.
-    """
-    topo.serving_mode = serving_mode
-    if serving_mode == "disaggregated" and topo.gpu_count >= 2:
-        prefill_n = max(1, round(topo.gpu_count * DISAGG_PREFILL_SHARE))
-        decode_n = max(1, topo.gpu_count - prefill_n)
-        topo.prefill_gpu_count = prefill_n
-        topo.decode_gpu_count = decode_n
-        topo.prefill_role_strategy = f"Prefill pool · {prefill_n}× GPU (compute-dense)"
-        topo.decode_role_strategy = f"Decode pool · {decode_n}× GPU (bandwidth-dense)"
-    else:
-        # Colocated, or disagg with too few GPUs to split meaningfully — mirror.
-        topo.prefill_gpu_count = topo.gpu_count
-        topo.decode_gpu_count = topo.gpu_count
-        topo.prefill_role_strategy = topo.parallelism_strategy
-        topo.decode_role_strategy = topo.parallelism_strategy
-    return topo
-
-
-def _should_recommend_disagg(workload: WorkloadInput) -> bool:
-    """True when the workload sits in the disaggregation sweet spot.
-
-    Disaggregation is operationally heavy (separate KV transfer, two pools to
-    schedule), so the advisory only fires when both prefill cost (long context)
-    and decode pressure (many concurrent users) are present. This matches the
-    public Dynamo / DeepSeek-V3 deployment pattern.
-    """
-    return (
-        workload.concurrent_users >= DISAGG_USERS_THRESHOLD
-        and workload.context_length >= DISAGG_CONTEXT_THRESHOLD
-    )
-
-
-# ---------------------------------------------------------------------------
-# MoE routing-overhead model (Sprint 9a)
-# ---------------------------------------------------------------------------
-# Public MoE deployments (Mixtral 8×22B, DeepSeek-V3, Qwen-MoE) report
-# steady-state all-to-all dispatch+combine overhead in the 10-25% band on
-# decode tokens, depending on whether expert-parallelism stays intra-node.
-# These numbers ARE NOT in the calibration table (which is Llama-3-70B dense),
-# so we apply them on top of calibrated decode tps.
-MOE_ROUTING_OVERHEAD_SINGLE_GPU = 0.0    # no all-to-all when EP=1
-MOE_ROUTING_OVERHEAD_INTRA_NODE = 0.12   # NVLink/IF intra-node — observed ~10-15%
-MOE_ROUTING_OVERHEAD_MULTI_NODE = 0.22   # IB cross-node — observed ~20-25%
-
-
-def _moe_routing_overhead(num_experts: int, active_experts: int, nodes: int, gpu_count: int) -> float:
-    """Return the all-to-all dispatch+combine penalty as a fraction in [0, 1].
-
-    Returns 0.0 when no routing is needed (EP=1, dense, or all experts active).
-    """
-    if num_experts <= 1 or active_experts >= num_experts:
-        return 0.0
-    if gpu_count <= 1:
-        return MOE_ROUTING_OVERHEAD_SINGLE_GPU
-    if nodes > 1:
-        return MOE_ROUTING_OVERHEAD_MULTI_NODE
-    return MOE_ROUTING_OVERHEAD_INTRA_NODE
 
 
 # ---------------------------------------------------------------------------
@@ -409,7 +327,164 @@ def _benchmark_scores_dict(
 
 
 # ---------------------------------------------------------------------------
-# GPU evaluation
+# GPU evaluation — phase helpers
+# ---------------------------------------------------------------------------
+def _apply_hard_filters(
+    gpu: GPU,
+    workload: WorkloadInput,
+    constraints: ConstraintInput,
+) -> tuple[GPUResult | None, list[str], list[str]]:
+    """Run the three hard short-circuit checks (workload-incompatible, DLC
+    required, model-too-large for RTX PRO).
+
+    Returns ``(early_result, warnings, codes)``. When ``early_result`` is not
+    None the caller should return it immediately; otherwise it should continue
+    with the populated ``warnings`` / ``codes`` (which carry any soft advisory
+    like ``MARGINAL_AIR_COOLING``).
+    """
+    warnings: list[str] = []
+    codes: list[str] = []
+
+    # 1. Workload constraint: RTX PRO 6000 BSE is inference-only.
+    if gpu.name == "RTX PRO 6000 BSE" and workload.workload_type in ("training", "fine-tuning", "pre-training"):
+        return (
+            GPUResult(
+                gpu_id=gpu.id,
+                gpu_name=gpu.name,
+                gpu_vendor=gpu.vendor,
+                warnings=[f"{gpu.name} is not suitable for {workload.workload_type} workloads (inference only)"],
+                violation_codes=[Violation.WORKLOAD_INCOMPATIBLE],
+                is_estimated=gpu.is_estimated,
+            ),
+            warnings,
+            codes,
+        )
+
+    # 2. Infrastructure constraint: air cooling can't host DLC-only GPUs.
+    if constraints.cooling_type == "air":
+        if gpu.cooling_requirement == "DLC":
+            return (
+                GPUResult(
+                    gpu_id=gpu.id,
+                    gpu_name=gpu.name,
+                    gpu_vendor=gpu.vendor,
+                    warnings=[f"{gpu.name} requires liquid cooling (DLC mandatory)"],
+                    violation_codes=[Violation.DLC_REQUIRED],
+                    is_estimated=gpu.is_estimated,
+                ),
+                warnings,
+                codes,
+            )
+        # B200 on air is marginal, advisory only.
+        if gpu.name == "B200 HGX" and gpu.tdp_watts and gpu.tdp_watts > 900:
+            warnings.append(f"{gpu.name} has marginal air cooling support at {gpu.tdp_watts}W TDP")
+            codes.append(Violation.MARGINAL_AIR_COOLING)
+
+    # 3. Memory constraint: RTX PRO can't host 200B+ models.
+    if workload.model_params_b >= 200 and gpu.name == "RTX PRO 6000 BSE":
+        return (
+            GPUResult(
+                gpu_id=gpu.id,
+                gpu_name=gpu.name,
+                gpu_vendor=gpu.vendor,
+                warnings=[f"{gpu.name} cannot handle {workload.model_params_b}B parameter models (96GB insufficient for 200B+ models)"],
+                violation_codes=[Violation.MODEL_TOO_LARGE],
+                is_estimated=gpu.is_estimated,
+            ),
+            warnings,
+            codes,
+        )
+
+    return None, warnings, codes
+
+
+def _compute_latency(
+    workload: WorkloadInput,
+    effective_decode: float,
+    effective_prefill: float,
+    total_sequences: int,
+) -> tuple[float | None, float | None, float]:
+    """Return ``(ttft_ms, tpot_ms, per_user_decode_tps)`` for the workload.
+
+    Aggregate throughput is shared across ``total_sequences`` concurrent users,
+    so per-user rate = aggregate ÷ total_sequences. TTFT is wall-clock time to
+    chew through one user's prompt; TPOT is the gap between successive output
+    tokens for one user. Caller decides whether to emit ``TPOT_MISSED``.
+    """
+    user_count = max(1, total_sequences)
+    per_user_decode_tps = effective_decode / user_count if effective_decode > 0 else 0.0
+    per_user_prefill_tps = effective_prefill / user_count if effective_prefill > 0 else 0.0
+    tpot_ms = 1000.0 / per_user_decode_tps if per_user_decode_tps > 0 else None
+    ttft_ms = (
+        workload.context_length * 1000.0 / per_user_prefill_tps
+        if per_user_prefill_tps > 0
+        else None
+    )
+    return ttft_ms, tpot_ms, per_user_decode_tps
+
+
+def _compute_moe_surfacing(
+    workload: WorkloadInput,
+    moe_overhead: float,
+) -> tuple[float | None, float | None, float | None]:
+    """Return ``(active_param_fraction, effective_bw_per_token_gb, routing_overhead_pct)``
+    for MoE workloads. All-None for dense workloads.
+
+    ``effective_bw_per_token_gb`` is the active-expert weight bytes streamed
+    per output token — the bandwidth-bound denominator visible to the customer.
+    """
+    if not workload.is_moe or workload.num_experts <= 0:
+        return None, None, None
+    # Imported here to avoid a circular import at module load time.
+    from app.engine.performance import PRECISION_BYTES
+    active_fraction = workload.active_experts / workload.num_experts
+    bytes_per_param = PRECISION_BYTES.get(workload.precision, 2.0)
+    effective_bw_gb = workload.model_params_b * active_fraction * bytes_per_param
+    overhead_pct = round(moe_overhead * 100, 1) if moe_overhead > 0 else 0.0
+    return active_fraction, effective_bw_gb, overhead_pct
+
+
+def _collect_constraint_advisories(
+    gpu: GPU,
+    constraints: ConstraintInput,
+    cost,
+    avail,
+) -> tuple[list[str], list[str]]:
+    """Return ``(warnings, codes)`` for the post-cost / availability checks
+    (cooling, lead-time, budget, power, PRE_GA).
+    """
+    warnings: list[str] = []
+    codes: list[str] = []
+
+    if gpu.is_estimated:
+        warnings.append(f"{gpu.name} specs are estimated (pre-GA)")
+        codes.append(Violation.PRE_GA)
+    if gpu.cooling_type == "liquid" and constraints.cooling_type == "air":
+        if gpu.is_rack_scale:
+            warnings.append(f"{gpu.name} is incompatible with air cooling (rack-scale liquid required)")
+            codes.append(Violation.COOLING_HARD)
+        else:
+            warnings.append(f"{gpu.name} requires liquid cooling")
+            codes.append(Violation.COOLING_SOFT)
+    if not avail.meets_constraint:
+        warnings.append(f"{gpu.name} lead time ({avail.lead_time_weeks}w) exceeds constraint")
+        codes.append(Violation.LEAD_TIME)
+    if constraints.max_budget_usd and cost.tco_36m_usd > constraints.max_budget_usd:
+        warnings.append(
+            f"TCO ${cost.tco_36m_usd:,.0f} exceeds budget ${constraints.max_budget_usd:,.0f}"
+        )
+        codes.append(Violation.BUDGET)
+    if constraints.max_power_per_rack_kw and cost.power_kw > constraints.max_power_per_rack_kw:
+        warnings.append(
+            f"Power {cost.power_kw:.1f}kW exceeds rack limit {constraints.max_power_per_rack_kw}kW"
+        )
+        codes.append(Violation.POWER)
+
+    return warnings, codes
+
+
+# ---------------------------------------------------------------------------
+# GPU evaluation — orchestrator
 # ---------------------------------------------------------------------------
 def evaluate_gpu(
     db: Session,
@@ -418,50 +493,9 @@ def evaluate_gpu(
     constraints: ConstraintInput,
 ) -> GPUResult:
     """Evaluate a single GPU against the workload and constraints."""
-    warnings: list[str] = []
-    codes: list[str] = []
-
-    # --- Hard Constraint Filtering (Phase 3) ---
-
-    # 1. Workload Constraint: RTX PRO 6000 BSE for training/fine-tuning
-    if gpu.name == "RTX PRO 6000 BSE":
-        if workload.workload_type in ["training", "fine-tuning", "pre-training"]:
-            return GPUResult(
-                gpu_id=gpu.id,
-                gpu_name=gpu.name,
-                gpu_vendor=gpu.vendor,
-                warnings=[f"{gpu.name} is not suitable for {workload.workload_type} workloads (inference only)"],
-                violation_codes=[Violation.WORKLOAD_INCOMPATIBLE],
-                is_estimated=gpu.is_estimated,
-            )
-
-    # 2. Infrastructure Constraint: Air cooling vs high-TDP GPUs
-    if constraints.cooling_type == "air":
-        # Filter out DLC-only GPUs for air-cooled environments
-        if gpu.cooling_requirement == "DLC":
-            return GPUResult(
-                gpu_id=gpu.id,
-                gpu_name=gpu.name,
-                gpu_vendor=gpu.vendor,
-                warnings=[f"{gpu.name} requires liquid cooling (DLC mandatory)"],
-                violation_codes=[Violation.DLC_REQUIRED],
-                is_estimated=gpu.is_estimated,
-            )
-        # B200 air cooling is marginal, advisory only
-        if gpu.name in ["B200 HGX"] and gpu.tdp_watts and gpu.tdp_watts > 900:
-            warnings.append(f"{gpu.name} has marginal air cooling support at {gpu.tdp_watts}W TDP")
-            codes.append(Violation.MARGINAL_AIR_COOLING)
-
-    # 3. 200B Model Constraint: RTX PRO 6000 BSE capacity check
-    if workload.model_params_b >= 200 and gpu.name == "RTX PRO 6000 BSE":
-        return GPUResult(
-            gpu_id=gpu.id,
-            gpu_name=gpu.name,
-            gpu_vendor=gpu.vendor,
-            warnings=[f"{gpu.name} cannot handle {workload.model_params_b}B parameter models (96GB insufficient for 200B+ models)"],
-            violation_codes=[Violation.MODEL_TOO_LARGE],
-            is_estimated=gpu.is_estimated,
-        )
+    early, warnings, codes = _apply_hard_filters(gpu, workload, constraints)
+    if early is not None:
+        return early
 
     # --- Multi-tenancy: resolve per-tenant effective specs ---
     # apply_tenancy returns the per-tenant view of compute/memory/bandwidth.
@@ -541,8 +575,8 @@ def evaluate_gpu(
 
     # Disaggregated prefill/decode view — mirrors in colocated mode, splits
     # 30/70 in disaggregated mode. Sizing/cost are unchanged either way.
-    _apply_serving_mode(topo, workload.serving_mode)
-    if workload.serving_mode == "colocated" and _should_recommend_disagg(workload):
+    apply_serving_mode(topo, workload.serving_mode)
+    if workload.serving_mode == "colocated" and should_recommend_disagg(workload):
         warnings.append(
             "Workload may benefit from disaggregated prefill/decode "
             f"({workload.concurrent_users} users × {workload.context_length} ctx — "
@@ -589,7 +623,7 @@ def evaluate_gpu(
     # MoE all-to-all routing overhead — applied to decode only (per-token cost).
     # This is on top of calibration (which is dense-Llama-3-70B based and does
     # not reflect MoE dispatch costs).
-    moe_overhead = _moe_routing_overhead(
+    moe_overhead = moe_routing_overhead(
         workload.num_experts if workload.is_moe else 1,
         workload.active_experts if workload.is_moe else 1,
         topo.nodes,
@@ -625,21 +659,9 @@ def evaluate_gpu(
                 )
 
     # --- Per-user latency (TTFT, TPOT) ---
-    # Aggregate throughput is shared across `total_sequences` concurrent users,
-    # so per-user rate = aggregate / total_sequences. TTFT is wall-clock time
-    # to chew through one user's prompt of length context_length; TPOT is the
-    # gap between successive output tokens for one user.
-    user_count = max(1, total_sequences)
-    per_user_decode_tps = effective_decode / user_count if effective_decode > 0 else 0.0
-    per_user_prefill_tps = effective_prefill / user_count if effective_prefill > 0 else 0.0
-    tpot_ms = 1000.0 / per_user_decode_tps if per_user_decode_tps > 0 else None
-    ttft_ms = (
-        workload.context_length * 1000.0 / per_user_prefill_tps
-        if per_user_prefill_tps > 0
-        else None
+    ttft_ms, tpot_ms, per_user_decode_tps = _compute_latency(
+        workload, effective_decode, effective_prefill, total_sequences
     )
-
-    # Advisory: TPOT target missed (informational, does not gate ranking)
     if (
         constraints.target_tpot_ms is not None
         and tpot_ms is not None
@@ -690,31 +712,11 @@ def evaluate_gpu(
         )
 
     # --- Warnings + structured violation codes ---
-    if gpu.is_estimated:
-        warnings.append(f"{gpu.name} specs are estimated (pre-GA)")
-        codes.append(Violation.PRE_GA)
-    if gpu.cooling_type == "liquid" and constraints.cooling_type == "air":
-        if gpu.is_rack_scale:
-            warnings.append(f"{gpu.name} is incompatible with air cooling (rack-scale liquid required)")
-            codes.append(Violation.COOLING_HARD)
-        else:
-            warnings.append(f"{gpu.name} requires liquid cooling")
-            codes.append(Violation.COOLING_SOFT)
-    if not avail.meets_constraint:
-        warnings.append(
-            f"{gpu.name} lead time ({avail.lead_time_weeks}w) exceeds constraint"
-        )
-        codes.append(Violation.LEAD_TIME)
-    if constraints.max_budget_usd and cost.tco_36m_usd > constraints.max_budget_usd:
-        warnings.append(
-            f"TCO ${cost.tco_36m_usd:,.0f} exceeds budget ${constraints.max_budget_usd:,.0f}"
-        )
-        codes.append(Violation.BUDGET)
-    if constraints.max_power_per_rack_kw and cost.power_kw > constraints.max_power_per_rack_kw:
-        warnings.append(
-            f"Power {cost.power_kw:.1f}kW exceeds rack limit {constraints.max_power_per_rack_kw}kW"
-        )
-        codes.append(Violation.POWER)
+    advisory_warnings, advisory_codes = _collect_constraint_advisories(
+        gpu, constraints, cost, avail
+    )
+    warnings.extend(advisory_warnings)
+    codes.extend(advisory_codes)
 
     # --- Rack planning ---
     rack = plan_rack_layout(
@@ -760,18 +762,9 @@ def evaluate_gpu(
         max_ctx = max(0, max_ctx // sequences_per_replica)
 
     # MoE-specific surfacing — only meaningful when is_moe.
-    if workload.is_moe and workload.num_experts > 0:
-        moe_active_param_fraction = workload.active_experts / workload.num_experts
-        # Active-expert weight bytes streamed per output token, in GB.
-        from app.engine.performance import PRECISION_BYTES
-        bytes_per_param = PRECISION_BYTES.get(workload.precision, 2.0)
-        active_params_b = workload.model_params_b * moe_active_param_fraction
-        moe_effective_bw_per_token_gb = active_params_b * bytes_per_param  # B params × bytes ⇒ GB
-        moe_routing_overhead_pct = round(moe_overhead * 100, 1) if moe_overhead > 0 else 0.0
-    else:
-        moe_active_param_fraction = None
-        moe_effective_bw_per_token_gb = None
-        moe_routing_overhead_pct = None
+    moe_active_param_fraction, moe_effective_bw_per_token_gb, moe_routing_overhead_pct = (
+        _compute_moe_surfacing(workload, moe_overhead)
+    )
 
     # Per-tenant KV cache: under MIG, the slice's KV envelope is what matters
     # (not the aggregate); under Run:ai the full GPU KV is shared, but each

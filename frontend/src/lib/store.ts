@@ -7,6 +7,7 @@ import type {
   BenchmarkWithGPU,
 } from "@/types";
 import { api } from "./api";
+import { DEFAULT_CONSTRAINTS, DEFAULT_WORKLOAD } from "./defaults";
 import { toast } from "sonner";
 
 interface AppState {
@@ -43,41 +44,6 @@ function debouncedCompare(fn: () => void, ms = 250) {
   if (_debounceTimer) clearTimeout(_debounceTimer);
   _debounceTimer = setTimeout(fn, ms);
 }
-
-const DEFAULT_WORKLOAD: WorkloadInput = {
-  model_params_b: 70,
-  precision: "FP16",
-  context_length: 4096,
-  concurrent_users: 1,
-  workload_type: "inference",
-  batch_size: 1,
-  is_moe: false,
-  num_experts: 8,
-  active_experts: 2,
-  finance_benchmark_category: null,
-  multi_tenancy_mode: "dedicated",
-  mig_profile: null,
-  tenants: 1,
-  serving_mode: "colocated",
-};
-
-const DEFAULT_CONSTRAINTS: ConstraintInput = {
-  max_budget_usd: null,
-  max_power_per_rack_kw: null,
-  cooling_type: "air",
-  max_lead_time_weeks: null,
-  amortization_months: 48,
-  colo_usd_per_kw_per_month: 200,
-  hw_support_pct_of_capex_per_year: 0.10,
-  software_usd_per_gpu_per_year: 1000,
-  metric_weights: {
-    performance: 0.35,
-    cost: 0.3,
-    complexity: 0.15,
-    availability: 0.2,
-  },
-  target_tpot_ms: null,
-};
 
 export const useStore = create<AppState>((set, get) => ({
   gpus: [],
