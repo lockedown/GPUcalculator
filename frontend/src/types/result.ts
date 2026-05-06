@@ -71,6 +71,9 @@ export interface GPUResult {
   tco_usd: number | null;
   capex_usd: number | null;
   opex_monthly_usd: number | null;
+  // Annual operating-emissions estimate (kg CO2-equivalent per year) at the
+  // configured grid intensity. PUE-adjusted so cooling overhead is included.
+  carbon_kg_per_year: number | null;
   // Itemised monthly OpEx components in USD.
   opex_breakdown: {
     power_usd: number;
@@ -97,4 +100,7 @@ export interface ComparisonResponse {
   constraints: ConstraintInput;
   results: GPUResult[];
   sweet_spot_gpu: string | null;
+  // Up to 3 short reasons explaining why ``sweet_spot_gpu`` was chosen.
+  // Empty when no GPUs were evaluated.
+  sweet_spot_reasons: string[];
 }

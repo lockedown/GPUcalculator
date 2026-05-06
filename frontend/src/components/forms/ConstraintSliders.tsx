@@ -1,6 +1,8 @@
 "use client";
 
+import { useState } from "react";
 import { useStore } from "@/lib/store";
+import { REGION_OPTIONS, REGION_PRESETS, type Region } from "@/types";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { NumericInput } from "@/components/ui/numeric-input";
 import { Slider } from "@/components/ui/slider";
@@ -42,6 +44,26 @@ const WEIGHT_KEYS = [
 
 export default function ConstraintSliders() {
   const { constraints, setConstraints, setMetricWeight } = useStore();
+  // Region is a UI affordance over two backend fields (colo + grid intensity).
+  // We don't store it in the constraint payload — selecting one just snaps
+  // both numeric inputs to the regional preset values.  Detect the active
+  // region by matching back to the closest preset, defaulting to US-East.
+  const activeRegion: Region =
+    (Object.entries(REGION_PRESETS) as [Region, typeof REGION_PRESETS[Region]][]).find(
+      ([, p]) =>
+        p.colo_usd_per_kw_per_month === constraints.colo_usd_per_kw_per_month &&
+        p.grid_carbon_intensity_g_kwh === constraints.grid_carbon_intensity_g_kwh,
+    )?.[0] ?? "US-East";
+  const [regionDirty, setRegionDirty] = useState(false);
+
+  const applyRegion = (region: Region) => {
+    const preset = REGION_PRESETS[region];
+    setConstraints({
+      colo_usd_per_kw_per_month: preset.colo_usd_per_kw_per_month,
+      grid_carbon_intensity_g_kwh: preset.grid_carbon_intensity_g_kwh,
+    });
+    setRegionDirty(false);
+  };
 
   return (
     <Card>
@@ -168,6 +190,37 @@ export default function ConstraintSliders() {
           </div>
         </div>
 
+        {/* Region — a UI affordance that snaps colo + grid intensity to a
+            preset.  Backend stays region-agnostic; selecting a region just
+            updates the two numeric inputs below. */}
+        <div className="mt-5 flex flex-wrap items-end gap-3">
+          <div className="flex flex-col gap-1.5">
+            <label className="flex items-center gap-1 text-[11px] font-medium text-gray-500">
+              Region
+              <InfoTooltip learnMore="tco">
+                Snaps Colocation rate and Grid Carbon Intensity to regional defaults (CBRE H2-2025 colo rates + EPA eGRID 2024 / IEA 2024 grid mix). Manual edits to either field below are preserved — Region is just a quick-set.
+              </InfoTooltip>
+            </label>
+            <Select
+              value={activeRegion}
+              onValueChange={(v) => applyRegion(v as Region)}
+            >
+              <SelectTrigger className="w-56">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {REGION_OPTIONS.map((r) => (
+                  <SelectItem key={r.value} value={r.value}>{r.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <span className="pb-2 text-[10px] text-gray-400 max-w-md">
+            {REGION_PRESETS[activeRegion].blurb}
+            {regionDirty && " (manual override active)"}
+          </span>
+        </div>
+
         {/* Run Costs (OpEx components) */}
         <div className="mt-5">
           <span className="flex items-center gap-1 text-[11px] font-medium text-gray-500">
@@ -190,7 +243,10 @@ export default function ConstraintSliders() {
                 min={0}
                 fallback={200}
                 value={constraints.colo_usd_per_kw_per_month}
-                onChange={(v) => setConstraints({ colo_usd_per_kw_per_month: v ?? 0 })}
+                onChange={(v) => {
+                  setConstraints({ colo_usd_per_kw_per_month: v ?? 0 });
+                  setRegionDirty(true);
+                }}
               />
             </div>
             <div className="flex flex-col gap-1.5">
@@ -220,6 +276,24 @@ export default function ConstraintSliders() {
                 fallback={1000}
                 value={constraints.software_usd_per_gpu_per_year}
                 onChange={(v) => setConstraints({ software_usd_per_gpu_per_year: v ?? 0 })}
+              />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <label className="flex items-center gap-1 text-[10px] font-medium text-gray-500">
+                Grid CO₂ (g/kWh)
+                <InfoTooltip iconClassName="h-2.5 w-2.5">
+                  Grid carbon intensity in grams CO₂-equivalent per kWh, used to estimate annual operating emissions on the result. EPA eGRID 2024 / IEA 2024: US-East ~380, US-West (PNW) ~250, EU ~270, APAC (coal-heavy) ~550. Edit directly to override the regional preset.
+                </InfoTooltip>
+              </label>
+              <NumericInput
+                min={0}
+                max={1500}
+                fallback={380}
+                value={constraints.grid_carbon_intensity_g_kwh}
+                onChange={(v) => {
+                  setConstraints({ grid_carbon_intensity_g_kwh: v ?? 0 });
+                  setRegionDirty(true);
+                }}
               />
             </div>
           </div>

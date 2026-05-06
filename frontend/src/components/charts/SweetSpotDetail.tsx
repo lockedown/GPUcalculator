@@ -23,6 +23,8 @@ import {
 
 interface Props {
   result: GPUResult | null;
+  /** Top-N reasons explaining why this GPU was chosen as the sweet spot. */
+  reasons?: string[];
   loading?: boolean;
 }
 
@@ -37,7 +39,7 @@ const CODE_LABELS: Record<string, { label: string; tone: "warn" | "info" }> = {
   DISAGG_RECOMMENDED: { label: "Disaggregation recommended", tone: "info" },
 };
 
-export default function SweetSpotDetail({ result, loading }: Props) {
+export default function SweetSpotDetail({ result, reasons, loading }: Props) {
   const amortMonths = useStore((s) => s.constraints.amortization_months);
   if (loading) {
     return (
@@ -100,6 +102,22 @@ export default function SweetSpotDetail({ result, loading }: Props) {
             <CheckCircle2 className="mr-1 h-3 w-3" /> Recommended
           </Badge>
         </div>
+
+        {/* Why — top-N reasons explaining this pick */}
+        {reasons && reasons.length > 0 && (
+          <div className="rounded-md border border-emerald-100 bg-emerald-50/40 px-3 py-2">
+            <div className="mb-1 flex items-center gap-1 text-[10px] font-semibold uppercase tracking-widest text-emerald-700">
+              <CheckCircle2 className="h-3 w-3" /> Why this GPU
+            </div>
+            <ul className="space-y-0.5">
+              {reasons.map((reason, i) => (
+                <li key={i} className="text-[11px] leading-snug text-emerald-900">
+                  · {reason}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
 
         {/* Topology */}
         <Section
@@ -345,6 +363,13 @@ export default function SweetSpotDetail({ result, loading }: Props) {
             value={formatCurrency(result.tco_usd)}
             valueClass="font-semibold text-gray-900"
           />
+          {result.carbon_kg_per_year != null && (
+            <Row
+              label="Carbon (kg CO₂e / year)"
+              value={`${formatNumber(result.carbon_kg_per_year)} kg`}
+              valueClass="text-gray-600"
+            />
+          )}
         </Section>
 
         {/* Throughput economics */}

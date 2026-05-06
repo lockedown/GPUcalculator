@@ -44,6 +44,58 @@ class TestTCO:
         assert result.power_kw == pytest.approx(86.4, rel=0.01)
 
 
+class TestCarbonAccounting:
+    """Carbon emissions surfaced from the same power draw used for the
+    electricity OpEx line. PUE-adjusted (cooling overhead is real emissions).
+    """
+
+    def test_carbon_present_and_positive(self):
+        r = calc_tco(gpu_count=1, gpu_price_usd=30000, tdp_watts=700, tokens_per_sec=34)
+        assert r.carbon_kg_per_year is not None
+        assert r.carbon_kg_per_year > 0
+
+    def test_carbon_scales_with_gpu_count(self):
+        r1 = calc_tco(gpu_count=1, gpu_price_usd=30000, tdp_watts=700, tokens_per_sec=34)
+        r8 = calc_tco(gpu_count=8, gpu_price_usd=30000, tdp_watts=700, tokens_per_sec=272)
+        assert r8.carbon_kg_per_year == pytest.approx(r1.carbon_kg_per_year * 8, rel=0.01)
+
+    def test_carbon_scales_linearly_with_grid_intensity(self):
+        # Halving the grid intensity should halve the kg/year (everything else
+        # held constant).
+        r_us = calc_tco(
+            gpu_count=1, gpu_price_usd=30000, tdp_watts=700, tokens_per_sec=34,
+            grid_carbon_intensity_g_kwh=380,
+        )
+        r_pnw = calc_tco(
+            gpu_count=1, gpu_price_usd=30000, tdp_watts=700, tokens_per_sec=34,
+            grid_carbon_intensity_g_kwh=190,  # half US-East
+        )
+        assert r_pnw.carbon_kg_per_year == pytest.approx(r_us.carbon_kg_per_year / 2, rel=0.01)
+
+    def test_carbon_pue_adjusted(self):
+        # Liquid cooling has a lower PUE (1.15) than air (1.40); same TDP →
+        # liquid emits less carbon per year.
+        liquid = calc_tco(
+            gpu_count=1, gpu_price_usd=40000, tdp_watts=1000, tokens_per_sec=100,
+            cooling_type="liquid",
+        )
+        air = calc_tco(
+            gpu_count=1, gpu_price_usd=40000, tdp_watts=1000, tokens_per_sec=100,
+            cooling_type="air",
+        )
+        assert liquid.carbon_kg_per_year < air.carbon_kg_per_year
+
+    def test_carbon_us_east_realistic_magnitude(self):
+        # Sanity check: 1× 700W GPU at PUE 1.40 on a 380 g/kWh grid →
+        # 0.7 × 1.40 × 8760 × 380 / 1000 ≈ 3,261 kg CO₂/year.
+        r = calc_tco(
+            gpu_count=1, gpu_price_usd=30000, tdp_watts=700, tokens_per_sec=34,
+            cooling_type="air",
+            grid_carbon_intensity_g_kwh=380,
+        )
+        assert 3_000 < r.carbon_kg_per_year < 3_500
+
+
 class TestNetworkCost:
     def test_single_node_zero(self):
         cost = calc_network_cost(1, "IB_NDR")

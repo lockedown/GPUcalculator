@@ -253,11 +253,13 @@ export default function ApiDocsPage() {
           <p>The most-consulted fields on a <code>/api/compare</code> result:</p>
           <Defs items={[
             { term: "sweet_spot_gpu", def: "string — name of the highest-scoring GPU that passes all hard constraints. Falls back to overall top scorer if nothing passes." },
+            { term: "sweet_spot_reasons", def: "string[] — up to 3 short human-readable reasons explaining why sweet_spot_gpu was chosen (e.g. 'Best tokens/$/mo', 'Lowest TTFT in field', 'Only candidate passing all hard constraints'). Empty when no GPUs were evaluated." },
             { term: "results[].composite_score", def: "0-1 weighted composite. Already applies any constraint penalties." },
             { term: "results[].tco_usd", def: "Total Cost of Ownership over the configured amortisation period (USD)." },
             { term: "results[].capex_usd", def: "Hardware + network up-front cost (USD)." },
             { term: "results[].opex_monthly_usd", def: "Sum of the four OpEx lines per month (USD)." },
             { term: "results[].opex_breakdown", def: "Itemised monthly OpEx: { power_usd, colocation_usd, hw_support_usd, software_usd }." },
+            { term: "results[].carbon_kg_per_year", def: "Annual operating-emissions estimate (kg CO₂-equivalent / year). PUE-adjusted (cooling overhead included). Driven by ConstraintInput.grid_carbon_intensity_g_kwh — default 380 (US-East), region picker swaps for US-West / EU / APAC." },
             { term: "results[].tokens_per_usd", def: "Aggregate decode tokens / amortised $ / month — value-per-dollar." },
             { term: "results[].decode_tokens_per_sec", def: "Memory-bandwidth-bound aggregate across all DP replicas, calibrated against L3-70B benchmark." },
             { term: "results[].prefill_tokens_per_sec", def: "Compute-bound (with O(L) attention term applied) aggregate across replicas." },

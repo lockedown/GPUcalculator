@@ -41,4 +41,5 @@ export const DEFAULT_CONSTRAINTS: ConstraintInput = {
     availability: 0.20,
   },
   target_tpot_ms: null,
+  grid_carbon_intensity_g_kwh: 380,
 };

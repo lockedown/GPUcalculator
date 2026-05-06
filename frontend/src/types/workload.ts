@@ -43,4 +43,7 @@ export interface ConstraintInput {
   // Optional per-user latency target (ms). Candidates whose TPOT exceeds it
   // get the TPOT_MISSED advisory; ranking is unaffected.
   target_tpot_ms: number | null;
+  // Grid carbon intensity (g CO2e per kWh). Drives carbon_kg_per_year on the
+  // result. Default 380 g/kWh (US-East). Region picker swaps this.
+  grid_carbon_intensity_g_kwh: number;
 }

@@ -688,6 +688,7 @@ def evaluate_gpu(
         colo_usd_per_kw_per_month=constraints.colo_usd_per_kw_per_month,
         hw_support_pct_of_capex_per_year=constraints.hw_support_pct_of_capex_per_year,
         software_usd_per_gpu_per_year=constraints.software_usd_per_gpu_per_year,
+        grid_carbon_intensity_g_kwh=constraints.grid_carbon_intensity_g_kwh,
     )
 
     # --- Complexity ---
@@ -804,6 +805,7 @@ def evaluate_gpu(
         kv_cache_gb=perf_sizing.kv_cache_gb,   # Total KV for all sequences
         max_context_length=max_ctx,
         tco_usd=cost.tco_36m_usd,
+        carbon_kg_per_year=cost.carbon_kg_per_year,
         capex_usd=cost.capex_usd,
         opex_monthly_usd=cost.opex_monthly_usd,
         opex_breakdown=cost.opex_breakdown,
@@ -1002,6 +1004,100 @@ def run_calculation(
     return normalize_and_rank(results, constraints.metric_weights, constraints)
 
 
+def _explain_sweet_spot(
+    chosen: GPUResult,
+    results: list[GPUResult],
+    passing: list[GPUResult],
+    constraints: ConstraintInput,
+) -> list[str]:
+    """Return up to 3 short reasons explaining why ``chosen`` was picked.
+
+    Reasons are ordered by customer-meeting relevance: cost-efficiency first
+    (the $/tok argument lands in budget conversations), then user-perceived
+    latency (TTFT/TPOT), then constraint scarcity, then the strongest score
+    axis. Falls back to a generic "highest composite score" line if nothing
+    distinctive applies.
+    """
+    if not results or chosen is None:
+        return []
+
+    reasons: list[str] = []
+
+    # 1. Cost efficiency — best tokens/$/mo across the catalogue.
+    tokens_per_usd = [(r, r.tokens_per_usd) for r in results if r.tokens_per_usd]
+    if tokens_per_usd:
+        best = max(tokens_per_usd, key=lambda x: x[1])[0]
+        if best.gpu_name == chosen.gpu_name:
+            reasons.append(
+                f"Best tokens/$/mo across the catalogue ({chosen.tokens_per_usd:,.0f})"
+            )
+
+    # 2. User-perceived latency — only meaningful when a target was set or
+    # when this GPU is decisively faster than the field.
+    ttfts = [(r, r.ttft_ms) for r in results if r.ttft_ms is not None]
+    if ttfts and len(reasons) < 3:
+        best_ttft = min(ttfts, key=lambda x: x[1])[0]
+        if best_ttft.gpu_name == chosen.gpu_name and chosen.ttft_ms is not None:
+            reasons.append(f"Lowest TTFT in field ({chosen.ttft_ms:.0f} ms)")
+
+    tpots = [(r, r.tpot_ms) for r in results if r.tpot_ms is not None]
+    if tpots and len(reasons) < 3:
+        best_tpot = min(tpots, key=lambda x: x[1])[0]
+        if best_tpot.gpu_name == chosen.gpu_name and chosen.tpot_ms is not None:
+            target = constraints.target_tpot_ms
+            target_note = (
+                f" (within {target} ms target)"
+                if target is not None and chosen.tpot_ms <= target
+                else ""
+            )
+            reasons.append(f"Lowest TPOT in field ({chosen.tpot_ms:.1f} ms{target_note})")
+
+    # 3. Constraint scarcity — high-signal when only one or two pass.
+    if len(reasons) < 3 and len(passing) == 1 and chosen.gpu_name == passing[0].gpu_name:
+        reasons.append("Only candidate passing all hard constraints")
+    elif len(reasons) < 3 and len(passing) <= 3 and chosen in passing:
+        # Two or three pass — note this when nothing else is distinctive yet.
+        if not reasons:
+            reasons.append(f"One of {len(passing)} passing all hard constraints")
+
+    # 4. Score-axis dominance — best on whichever axis has the highest weight
+    # AND on which this GPU genuinely leads. Prevents "best perf" being a
+    # rounding tie. Skipped if we already have 3 reasons.
+    if len(reasons) < 3:
+        axis_lookup = {
+            "performance": ("perf", "decode_tokens_per_sec"),
+            "cost": ("cost", "tco_usd"),
+            "complexity": ("complexity", "complexity_score"),
+            "availability": ("availability", "availability_score"),
+        }
+        # Pick the axis with the largest user weight; tie-break alphabetically.
+        weights = constraints.metric_weights
+        sorted_axes = sorted(weights.items(), key=lambda kv: (-kv[1], kv[0]))
+        for axis, _w in sorted_axes:
+            if axis not in axis_lookup:
+                continue
+            label, attr = axis_lookup[axis]
+            values = [(r, getattr(r, attr)) for r in results if getattr(r, attr) is not None]
+            if not values:
+                continue
+            # Cost is "lower is better"; the others are "higher is better".
+            if axis == "cost":
+                best = min(values, key=lambda x: x[1])[0]
+            else:
+                best = max(values, key=lambda x: x[1])[0]
+            if best.gpu_name == chosen.gpu_name:
+                reasons.append(f"Strongest {label} score in the weighted ranking")
+                break
+
+    # 5. Composite-score fallback — never leave the field empty.
+    if not reasons:
+        reasons.append(
+            f"Highest composite score ({chosen.composite_score:.3f}) under the configured weights"
+        )
+
+    return reasons[:3]
+
+
 def run_comparison(
     db: Session,
     workload: WorkloadInput,
@@ -1017,15 +1113,19 @@ def run_comparison(
     # Smart sweet-spot: best GPU meeting all constraints
     passing = [r for r in results if _passes_all_constraints(r, constraints)]
     if passing:
-        sweet_spot = passing[0].gpu_name
+        chosen = passing[0]
     elif results:
-        sweet_spot = results[0].gpu_name
+        chosen = results[0]
     else:
-        sweet_spot = None
+        chosen = None
+
+    sweet_spot = chosen.gpu_name if chosen else None
+    reasons = _explain_sweet_spot(chosen, results, passing, constraints) if chosen else []
 
     return ComparisonResponse(
         workload=workload,
         constraints=constraints,
         results=results,
         sweet_spot_gpu=sweet_spot,
+        sweet_spot_reasons=reasons,
     )

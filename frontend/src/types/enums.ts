@@ -77,6 +77,56 @@ export const BENCHMARK_CATEGORIES = [
 
 export const PRECISION_OPTIONS = ["FP4", "FP8", "FP16", "BF16", "FP32"] as const;
 
+// ---- Regional pricing + grid intensity (Sprint v2.2) ----
+// The frontend region picker is a UI affordance over the existing constraint
+// fields — selecting a region just sets ``colo_usd_per_kw_per_month`` and
+// ``grid_carbon_intensity_g_kwh`` to the regional preset values. The backend
+// stays region-agnostic; it only sees the resulting numbers.
+//
+// Colocation rates from CBRE H2 2025 / 2026 outlook for major DC markets.
+// Grid intensity from EPA eGRID 2024 (US sub-regions) and IEA 2024 (EU/APAC
+// production-mix averages). APAC is coal-heavy; EU is the cleanest of the
+// large markets after the post-2022 renewables build-out.
+export type Region = "US-East" | "US-West" | "EU" | "APAC";
+
+export interface RegionPreset {
+  label: string;
+  colo_usd_per_kw_per_month: number;
+  grid_carbon_intensity_g_kwh: number;
+  blurb: string;
+}
+
+export const REGION_PRESETS: Record<Region, RegionPreset> = {
+  "US-East": {
+    label: "US East (NoVA / PJM)",
+    colo_usd_per_kw_per_month: 195,
+    grid_carbon_intensity_g_kwh: 380,
+    blurb: "PJM grid; CBRE NoVA $195/kW-mo. The default — most US enterprise hyperscaler footprints.",
+  },
+  "US-West": {
+    label: "US West (PNW / Cascade)",
+    colo_usd_per_kw_per_month: 210,
+    grid_carbon_intensity_g_kwh: 250,
+    blurb: "Pacific NW hydro-heavy grid (cleaner). Power costs slightly higher than US-East.",
+  },
+  "EU": {
+    label: "EU (FR / NL / IE blend)",
+    colo_usd_per_kw_per_month: 230,
+    grid_carbon_intensity_g_kwh: 270,
+    blurb: "FRA / AMS / DUB blend. Higher rents but cleaner grid; energy costs above US.",
+  },
+  "APAC": {
+    label: "APAC (SG / TYO / SYD blend)",
+    colo_usd_per_kw_per_month: 180,
+    grid_carbon_intensity_g_kwh: 550,
+    blurb: "SIN / TYO / SYD blend. Cheapest rents but coal-heavy grid pushes carbon up sharply.",
+  },
+};
+
+export const REGION_OPTIONS: { value: Region; label: string }[] = (
+  Object.entries(REGION_PRESETS) as [Region, RegionPreset][]
+).map(([value, p]) => ({ value, label: p.label }));
+
 // ---- Per-GPU brand colours used by charts + cards ----
 export const GPU_COLORS: Record<string, string> = {
   "H200 SXM5": "#1d6ed8",
