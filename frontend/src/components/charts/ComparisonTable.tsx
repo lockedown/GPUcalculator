@@ -4,72 +4,12 @@ import Link from "next/link";
 import type { GPUResult } from "@/types";
 import { GPU_COLORS } from "@/types";
 import { formatNumber, formatCurrency } from "@/lib/utils";
+import { downloadComparisonCsv } from "@/lib/csv-export";
 import { AlertTriangle, Trophy, ChevronRight, Download } from "lucide-react";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-
-function exportCSV(results: GPUResult[]) {
-  const headers = [
-    "Rank", "GPU", "Vendor", "Score",
-    "Decode tok/s", "Prefill tok/s",
-    "TTFT (ms)", "TPOT (ms)", "Per-user decode tok/s",
-    "Tenancy", "Tenants/GPU", "Per-tenant decode tok/s",
-    "MoE Active%", "MoE BW/token (GB)", "MoE Routing overhead%",
-    "TCO (USD)", "CapEx (USD)", "OpEx/mo (USD)", "Tokens/USD/mo",
-    "Complexity", "Availability",
-    "GPU Count", "Nodes", "Strategy",
-    "Serving Mode", "Prefill GPUs", "Decode GPUs",
-    "Racks", "Power/Rack (kW)", "PDU Tier",
-    "Warnings",
-  ];
-  const rows = results.map((r, i) => [
-    i + 1,
-    r.gpu_name,
-    r.gpu_vendor,
-    r.composite_score?.toFixed(4) ?? "",
-    r.decode_tokens_per_sec?.toFixed(0) ?? "",
-    r.prefill_tokens_per_sec?.toFixed(0) ?? "",
-    r.ttft_ms?.toFixed(0) ?? "",
-    r.tpot_ms?.toFixed(1) ?? "",
-    r.per_user_decode_tps?.toFixed(1) ?? "",
-    r.tenancy_mode_applied ?? "dedicated",
-    r.tenants_per_gpu ?? "",
-    r.per_tenant_decode_tps?.toFixed(1) ?? "",
-    r.moe_active_param_fraction != null ? (r.moe_active_param_fraction * 100).toFixed(0) : "",
-    r.moe_effective_bw_per_token_gb?.toFixed(1) ?? "",
-    r.moe_routing_overhead_pct?.toFixed(0) ?? "",
-    r.tco_usd?.toFixed(0) ?? "",
-    r.capex_usd?.toFixed(0) ?? "",
-    r.opex_monthly_usd?.toFixed(0) ?? "",
-    r.tokens_per_usd?.toFixed(0) ?? "",
-    r.complexity_score?.toFixed(2) ?? "",
-    r.availability_score?.toFixed(2) ?? "",
-    r.topology?.gpu_count ?? "",
-    r.topology?.nodes ?? "",
-    r.topology?.parallelism_strategy ?? "",
-    r.topology?.serving_mode ?? "colocated",
-    r.topology?.prefill_gpu_count ?? "",
-    r.topology?.decode_gpu_count ?? "",
-    r.rack_plan?.total_racks ?? "",
-    r.rack_plan?.power_per_rack_kw ?? "",
-    r.rack_plan?.pdu_tier_label ?? "",
-    r.warnings.join("; "),
-  ]);
-
-  const csv = [headers, ...rows].map((row) =>
-    row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(",")
-  ).join("\n");
-
-  const blob = new Blob([csv], { type: "text/csv" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `gpu_comparison_${new Date().toISOString().slice(0, 10)}.csv`;
-  a.click();
-  URL.revokeObjectURL(url);
-}
 
 interface Props {
   results: GPUResult[];
@@ -109,7 +49,7 @@ export default function ComparisonTable({ results, sweetSpot, loading }: Props) 
           variant="outline"
           size="sm"
           className="gap-1.5 text-[10px] h-7"
-          onClick={() => exportCSV(results)}
+          onClick={() => downloadComparisonCsv(results)}
         >
           <Download className="h-3 w-3" /> Export CSV
         </Button>
