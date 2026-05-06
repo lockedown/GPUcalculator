@@ -29,11 +29,18 @@ BEGIN
     END IF;
     
     -- Add interconnect_type column
-    IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns
                    WHERE table_name='gpus' AND column_name='interconnect_type') THEN
         ALTER TABLE gpus ADD COLUMN interconnect_type VARCHAR(50);
     END IF;
-    
+
+    -- Add nvlink_topology column (sprint-9b — fabric topology classification:
+    -- nvswitch | nvl_fabric | point_to_point | none)
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                   WHERE table_name='gpus' AND column_name='nvlink_topology') THEN
+        ALTER TABLE gpus ADD COLUMN nvlink_topology VARCHAR(20);
+    END IF;
+
     -- Add cooling_requirement column
     IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
                    WHERE table_name='gpus' AND column_name='cooling_requirement') THEN
@@ -94,6 +101,14 @@ INSERT INTO gpus (name, vendor, generation, form_factor, hbm_capacity_gb, hbm_ty
 ('MI300X', 'AMD', 'Instinct MI300', 'OAM', 192, 'HBM3', 3.2, 192, 'HBM3', 3.2, 1300, NULL, NULL, NULL, false, 750, 'air', 'Infinity Fabric v3', 896, 'IF v3', 'Any', '["inference", "training", "fine-tuning"]'::jsonb, 8, false, NULL, NULL, 22000, false, '2024-Q1', NOW(), NOW()),
 ('MI350X', 'AMD', 'Instinct MI350', 'OAM', 256, 'HBM3e', 6.0, 256, 'HBM3e', 6.0, 1800, NULL, 3600, NULL, false, 750, 'air', 'Infinity Fabric v4', 1500, 'IF v4', 'Any', '["inference", "training", "fine-tuning"]'::jsonb, 8, false, NULL, NULL, 28000, false, '2025-H2', NOW(), NOW()),
 ('MI355X', 'AMD', 'Instinct MI355', 'OAM', 288, 'HBM3e', 6.4, 288, 'HBM3e', 6.4, 2000, NULL, 4000, NULL, false, 750, 'air', 'Infinity Fabric v4', 1600, 'IF v4', 'Any', '["inference", "training", "fine-tuning"]'::jsonb, 8, false, NULL, NULL, 26000, false, '2026-Q1', NOW(), NOW());
+
+-- Backfill nvlink_topology (sprint-9b). Kept as a separate UPDATE block so
+-- adding a new GPU to the INSERT above doesn't require touching every column
+-- list — append a row to the matching topology bucket here instead.
+UPDATE gpus SET nvlink_topology = 'nvswitch'       WHERE name IN ('H100 SXM5', 'H200 SXM', 'B200 HGX', 'B300 HGX');
+UPDATE gpus SET nvlink_topology = 'nvl_fabric'     WHERE name IN ('GB200 NVL72', 'GB300 NVL72');
+UPDATE gpus SET nvlink_topology = 'point_to_point' WHERE name IN ('MI300X', 'MI350X', 'MI355X');
+UPDATE gpus SET nvlink_topology = 'none'           WHERE name = 'RTX PRO 6000 BSE';
 
 -- Insert availability data (all GPUs)
 INSERT INTO availability (gpu_id, lead_time_weeks, supply_status) 
@@ -345,7 +360,7 @@ JOIN gpus g ON g.name = t.gpu_name;
 -- =====================================================
 -- Verification queries
 -- =====================================================
-SELECT 
+SELECT
     name,
     memory_gb,
     memory_type,
@@ -353,8 +368,9 @@ SELECT
     fp8_tflops,
     supports_fp4,
     cooling_requirement,
+    nvlink_topology,
     supported_workloads
-FROM gpus 
+FROM gpus
 ORDER BY 
     CASE 
         WHEN name LIKE 'H100%' THEN 1
