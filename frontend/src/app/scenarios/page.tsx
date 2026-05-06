@@ -183,9 +183,14 @@ export default function ScenariosPage() {
           </CardContent>
         </Card>
       ) : (
+        // Fixed-width tracks so card width stays uniform regardless of how
+        // many scenarios are pinned.  ``auto-fill, 320px`` packs as many
+        // 320 px columns as fit; rows wrap when the viewport can't hold
+        // them all.  The print stylesheet (globals.css) overrides this
+        // back to ``repeat(2, …)`` for A4-portrait layout.
         <div
           className="grid gap-4 print-scenarios-grid"
-          style={{ gridTemplateColumns: `repeat(${rows.length}, minmax(0, 1fr))` }}
+          style={{ gridTemplateColumns: "repeat(auto-fill, 320px)" }}
         >
           {rows.map((row) => (
             <ScenarioCard key={row.scenario.id} row={row} onRemove={handleUnpin} />
