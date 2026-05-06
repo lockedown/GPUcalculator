@@ -20,6 +20,7 @@ function exportCSV(results: GPUResult[]) {
     "TCO (USD)", "CapEx (USD)", "OpEx/mo (USD)", "Tokens/USD/mo",
     "Complexity", "Availability",
     "GPU Count", "Nodes", "Strategy",
+    "Serving Mode", "Prefill GPUs", "Decode GPUs",
     "Racks", "Power/Rack (kW)", "PDU Tier",
     "Warnings",
   ];
@@ -48,6 +49,9 @@ function exportCSV(results: GPUResult[]) {
     r.topology?.gpu_count ?? "",
     r.topology?.nodes ?? "",
     r.topology?.parallelism_strategy ?? "",
+    r.topology?.serving_mode ?? "colocated",
+    r.topology?.prefill_gpu_count ?? "",
+    r.topology?.decode_gpu_count ?? "",
     r.rack_plan?.total_racks ?? "",
     r.rack_plan?.power_per_rack_kw ?? "",
     r.rack_plan?.pdu_tier_label ?? "",
@@ -214,6 +218,16 @@ export default function ComparisonTable({ results, sweetSpot, loading }: Props) 
                       {r.tenancy_mode_applied === "runai_fractional" && (
                         <Badge variant="outline" className="font-mono text-[10px] border-blue-300 text-blue-700">
                           Run:ai · ÷{r.tenants_per_gpu}
+                        </Badge>
+                      )}
+                      {r.topology?.serving_mode === "disaggregated" && (
+                        <Badge variant="outline" className="font-mono text-[10px] border-emerald-300 text-emerald-700">
+                          Disagg · {r.topology.prefill_gpu_count}P / {r.topology.decode_gpu_count}D
+                        </Badge>
+                      )}
+                      {r.violation_codes.includes("DISAGG_RECOMMENDED") && (
+                        <Badge variant="outline" className="font-mono text-[10px] border-indigo-300 text-indigo-700">
+                          Disagg recommended
                         </Badge>
                       )}
                     </div>

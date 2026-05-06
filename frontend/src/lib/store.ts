@@ -58,6 +58,7 @@ const DEFAULT_WORKLOAD: WorkloadInput = {
   multi_tenancy_mode: "dedicated",
   mig_profile: null,
   tenants: 1,
+  serving_mode: "colocated",
 };
 
 const DEFAULT_CONSTRAINTS: ConstraintInput = {
