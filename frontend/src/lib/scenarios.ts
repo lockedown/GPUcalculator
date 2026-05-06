@@ -9,10 +9,11 @@
  *     visitor's local pins.
  */
 
+import { useEffect, useState } from "react";
 import type { WorkloadInput, ConstraintInput } from "@/types";
 
 const STORAGE_KEY = "gpu-calc-pinned-scenarios";
-export const MAX_PINNED = 4;
+export const MAX_PINNED = 6;
 
 export interface PinnedScenario {
   id: string;                       // uuid (random)
@@ -43,9 +44,23 @@ export function loadPinned(): PinnedScenario[] {
   return safeParse(window.localStorage.getItem(STORAGE_KEY));
 }
 
+// ---------------------------------------------------------------------------
+// In-memory subscribers — let any component (dashboard count badge,
+// scenarios page) react to add / remove / clear without each one having to
+// poll localStorage. The native `storage` event only fires across tabs, not
+// within the same tab, so we publish manually after every save.
+// ---------------------------------------------------------------------------
+type Listener = () => void;
+const listeners = new Set<Listener>();
+
+function notify() {
+  listeners.forEach(l => l());
+}
+
 function savePinned(list: PinnedScenario[]): void {
   if (typeof window === "undefined") return;
   window.localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
+  notify();
 }
 
 /**
@@ -86,6 +101,51 @@ export function renameScenario(id: string, name: string): PinnedScenario[] {
 export function clearPinned(): void {
   if (typeof window === "undefined") return;
   window.localStorage.removeItem(STORAGE_KEY);
+  notify();
+}
+
+/**
+ * Clear all pins but return a snapshot first, so the caller can offer Undo.
+ * Pair with ``restorePinned`` if the user clicks Undo within the toast window.
+ */
+export function clearPinnedWithSnapshot(): PinnedScenario[] {
+  const snapshot = loadPinned();
+  clearPinned();
+  return snapshot;
+}
+
+/**
+ * Restore a previously cleared snapshot. Used by the toast Undo action.
+ * If the user pinned new scenarios in the brief Undo window, the snapshot
+ * overwrites them — that's the same behaviour as any toast-undo flow and
+ * keeps the API simple.
+ */
+export function restorePinned(snapshot: PinnedScenario[]): void {
+  savePinned(snapshot);
+}
+
+/**
+ * React hook returning the current pinned-scenario count, kept live across
+ * pin / unpin / clear within the same tab. Returns 0 during SSR (the count
+ * stays accurate after first-mount hydration).
+ */
+export function usePinnedCount(): number {
+  const [count, setCount] = useState<number>(0);
+  useEffect(() => {
+    const update = () => setCount(loadPinned().length);
+    update();
+    listeners.add(update);
+    // Cross-tab sync — fires only when *another* tab writes.
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === STORAGE_KEY) update();
+    };
+    window.addEventListener("storage", onStorage);
+    return () => {
+      listeners.delete(update);
+      window.removeEventListener("storage", onStorage);
+    };
+  }, []);
+  return count;
 }
 
 /**

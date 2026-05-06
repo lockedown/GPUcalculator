@@ -8,7 +8,7 @@ import ConstraintSliders from "@/components/forms/ConstraintSliders";
 import BubbleScatter from "@/components/charts/BubbleScatter";
 import SweetSpotDetail from "@/components/charts/SweetSpotDetail";
 import ComparisonTable from "@/components/charts/ComparisonTable";
-import { Trophy, Cpu, Zap, Banknote, Link as LinkIcon, Check, Pin, Printer } from "lucide-react";
+import { Trophy, Cpu, Zap, Banknote, Link as LinkIcon, Check, Pin, Printer, Layers, Trash2 } from "lucide-react";
 import { formatCurrency, formatNumber } from "@/lib/utils";
 import { GPU_COLORS } from "@/types";
 import { Card, CardContent } from "@/components/ui/card";
@@ -17,13 +17,20 @@ import { InfoTooltip } from "@/components/ui/info-tooltip";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { useState } from "react";
-import { pinScenario, MAX_PINNED } from "@/lib/scenarios";
+import {
+  pinScenario,
+  clearPinnedWithSnapshot,
+  restorePinned,
+  usePinnedCount,
+  MAX_PINNED,
+} from "@/lib/scenarios";
 import Link from "next/link";
 
 export default function Dashboard() {
   const { comparison, fetchGpus, runComparison, loading, constraints, workload } = useStore();
   useUrlSync(); // Two-way sync between URL ?params and store state
   const [copied, setCopied] = useState(false);
+  const pinnedCount = usePinnedCount();
 
   useEffect(() => {
     fetchGpus();
@@ -54,6 +61,22 @@ export default function Dashboard() {
     toast.success("Scenario pinned", {
       description: `${result.length} of ${MAX_PINNED} pinned. Compare them on /scenarios.`,
       action: { label: "View", onClick: () => { window.location.href = "/scenarios"; } },
+    });
+  }
+
+  function clearAllPins() {
+    const snapshot = clearPinnedWithSnapshot();
+    if (snapshot.length === 0) return;
+    toast.success(`Cleared ${snapshot.length} scenario${snapshot.length > 1 ? "s" : ""}`, {
+      description: "Removed from your local pins.",
+      duration: 6000,
+      action: {
+        label: "Undo",
+        onClick: () => {
+          restorePinned(snapshot);
+          toast.success("Pins restored");
+        },
+      },
     });
   }
 
@@ -96,9 +119,38 @@ export default function Dashboard() {
           >
             <Pin className="h-3.5 w-3.5" /> Pin scenario
           </Button>
-          <Button asChild variant="ghost" size="sm" title="View pinned scenarios side-by-side">
-            <Link href="/scenarios">Compare pins</Link>
-          </Button>
+          {pinnedCount === 0 ? (
+            <Button
+              variant="outline"
+              size="sm"
+              disabled
+              title="No scenarios pinned yet — pin one first"
+            >
+              <Layers className="h-3.5 w-3.5" /> Compare pins
+            </Button>
+          ) : (
+            <Button
+              asChild
+              variant="outline"
+              size="sm"
+              title={`View ${pinnedCount} pinned scenario${pinnedCount > 1 ? "s" : ""} side-by-side`}
+            >
+              <Link href="/scenarios">
+                <Layers className="h-3.5 w-3.5" /> Compare pins ({pinnedCount}/{MAX_PINNED})
+              </Link>
+            </Button>
+          )}
+          {pinnedCount > 0 && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={clearAllPins}
+              title={`Remove all ${pinnedCount} pinned scenario${pinnedCount > 1 ? "s" : ""} (Undo available for 6s)`}
+              className="text-rose-600 hover:bg-rose-50 hover:text-rose-700"
+            >
+              <Trash2 className="h-3.5 w-3.5" /> Clear pins
+            </Button>
+          )}
           <Button
             variant="outline"
             size="sm"

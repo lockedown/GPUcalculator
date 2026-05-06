@@ -3,13 +3,15 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
-import { Trash2, Link as LinkIcon, Check, Pin, Printer } from "lucide-react";
+import { Trash2, Link as LinkIcon, Check, Pin, Printer, Eraser } from "lucide-react";
 import {
   loadPinned,
   unpinScenario,
   encodePinnedToUrl,
   decodeUrlToPinned,
   importPinned,
+  clearPinnedWithSnapshot,
+  restorePinned,
   MAX_PINNED,
   type PinnedScenario,
 } from "@/lib/scenarios";
@@ -84,6 +86,24 @@ export default function ScenariosPage() {
     toast.success("Scenario removed");
   }
 
+  function handleClearAll() {
+    const snapshot = clearPinnedWithSnapshot();
+    if (snapshot.length === 0) return;
+    refresh();
+    toast.success(`Cleared ${snapshot.length} scenario${snapshot.length > 1 ? "s" : ""}`, {
+      description: "Removed from your local pins.",
+      duration: 6000,
+      action: {
+        label: "Undo",
+        onClick: () => {
+          restorePinned(snapshot);
+          refresh();
+          toast.success("Pins restored");
+        },
+      },
+    });
+  }
+
   async function handleCopyComparisonLink() {
     if (typeof window === "undefined") return;
     const pinned = loadPinned();
@@ -138,6 +158,15 @@ export default function ScenariosPage() {
             >
               <Printer className="h-3.5 w-3.5" /> Print / PDF
             </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleClearAll}
+              title={`Remove all ${rows.length} pinned scenario${rows.length > 1 ? "s" : ""} (Undo available for 6s)`}
+              className="text-rose-600 hover:bg-rose-50 hover:text-rose-700"
+            >
+              <Eraser className="h-3.5 w-3.5" /> Clear all
+            </Button>
           </div>
         )}
       </div>
@@ -154,9 +183,14 @@ export default function ScenariosPage() {
           </CardContent>
         </Card>
       ) : (
+        // Fixed-width tracks so card width stays uniform regardless of how
+        // many scenarios are pinned.  ``auto-fill, 320px`` packs as many
+        // 320 px columns as fit; rows wrap when the viewport can't hold
+        // them all.  The print stylesheet (globals.css) overrides this
+        // back to ``repeat(2, …)`` for A4-portrait layout.
         <div
           className="grid gap-4 print-scenarios-grid"
-          style={{ gridTemplateColumns: `repeat(${rows.length}, minmax(0, 1fr))` }}
+          style={{ gridTemplateColumns: "repeat(auto-fill, 320px)" }}
         >
           {rows.map((row) => (
             <ScenarioCard key={row.scenario.id} row={row} onRemove={handleUnpin} />
