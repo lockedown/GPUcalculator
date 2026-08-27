@@ -43,7 +43,7 @@ _REFERENCE_DECODE_SNAPSHOT_2026_08_27: dict[str, float] = {
     "Vera Rubin NVL72": 560.0,
     "Rubin CPX": 45.0,
     "MI450X": 200.0,
-    "MI455X": 230.0,
+    "MI455X": 600.0,  # full-rack figure (rack-scale), not per-GPU
 }
 
 _REFERENCE_PREFILL_SNAPSHOT_2026_08_27: dict[str, float] = {
@@ -61,7 +61,7 @@ _REFERENCE_PREFILL_SNAPSHOT_2026_08_27: dict[str, float] = {
     "Vera Rubin NVL72": 210_000.0,
     "Rubin CPX": 95_000.0,
     "MI450X": 80_000.0,
-    "MI455X": 95_000.0,
+    "MI455X": 220_000.0,  # full-rack figure (rack-scale), not per-GPU
 }
 
 
@@ -170,3 +170,30 @@ class TestCalibration:
         a = calibrate_decode("MI300X", 50.0, "FP16")
         b = calibrate_decode("MI300X", 50.0, "FP16")
         assert a == b
+
+
+class TestRackScaleCalibrationConvention:
+    """MI455X is rack-scale (is_rack_scale=True, rack_gpu_count=72 in
+    seed.py) exactly like the NVL72 GPUs, so its calibration factor must be
+    derived at the same gpu_count=72 baseline they use — evaluate_gpu always
+    evaluates it at gpu_count=72 too. Getting this wrong once let MI455X's
+    calibrated decode/prefill come out ~70x too high relative to its NVL72
+    peers, wildly overstating a 20-user workload's cost-efficiency at full
+    72-GPU-rack scale (composite score nearly beat sane single-GPU picks).
+    """
+
+    def test_mi455x_factor_matches_rack_scale_peers_order_of_magnitude(self):
+        rack_peers = ["GB200 NVL72", "GB300 NVL72", "Vera Rubin NVL72"]
+        mi455x_decode = get_decode_factor("MI455X")
+        mi455x_prefill = get_prefill_factor("MI455X")
+        for peer in rack_peers:
+            # Same order of magnitude (within 10x) — not the ~70x-too-high
+            # factor you get from computing the raw baseline at gpu_count=1.
+            assert 0.1 < mi455x_decode / get_decode_factor(peer) < 10.0
+            assert 0.1 < mi455x_prefill / get_prefill_factor(peer) < 10.0
+
+    def test_mi450x_is_not_treated_as_rack_scale(self):
+        # MI450X is a standalone OAM card (is_rack_scale=False) — its factor
+        # should stay in the single-GPU convention (order-1), not get the
+        # gpu_count=72 rack treatment MI455X needs.
+        assert get_decode_factor("MI450X") > 0.5

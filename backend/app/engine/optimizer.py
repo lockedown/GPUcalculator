@@ -139,23 +139,54 @@ def calc_topology(
     # Use new memory_gb field if available, otherwise fallback to hbm_capacity_gb
     single_gpu_memory = gpu.memory_gb if gpu.memory_gb is not None else gpu.hbm_capacity_gb
 
-    # --- Rack-scale path (NVL72) ---
+    # --- Rack-scale path (NVL72 / Helios) ---
     if gpu.is_rack_scale and gpu.rack_gpu_count:
-        total_hbm = single_gpu_memory * gpu.rack_gpu_count
-        if total_memory_gb <= total_hbm:
-            return TopologyResult(
-                gpu_count=gpu.rack_gpu_count,
-                nodes=1,
-                gpus_per_node=gpu.rack_gpu_count,
-                parallelism_strategy="NVL72 unified fabric",
-                tp_degree=gpu.rack_gpu_count,
-                pp_degree=1,
-                dp_degree=1,
-                effective_bandwidth_gb_s=(
-                    gpu.rack_fabric_bw_tb_s * 1000 if gpu.rack_fabric_bw_tb_s else None
-                ),
-                cross_node_latency_penalty=0.0,
-            )
+        rack_gpu_count = gpu.rack_gpu_count
+        total_hbm = single_gpu_memory * rack_gpu_count
+        total_streams = concurrent_users * batch_size
+
+        # How many racks does memory alone require? A rack-scale system is
+        # bought/deployed in whole-rack units — there's no partial-rack TP,
+        # so once one rack's aggregate HBM is exceeded the next unit is a
+        # whole additional rack (DP across racks), not a bigger single rack.
+        dp_memory = max(1, math.ceil(total_memory_gb / total_hbm)) if total_hbm > 0 else 1
+
+        # Throughput-aware: how many racks keep each concurrent stream at
+        # MIN_DECODE_TPS_PER_USER. `per_gpu_decode_tps` here is already the
+        # calibrated *whole-rack* single-stream decode figure (the caller
+        # sizes it at gpu_count=rack_gpu_count, matching how NVL72/Helios
+        # calibration anchors are themselves defined at full-rack scale —
+        # see calibration.py's RACK_SCALE_REFERENCE_GPUS) — no further
+        # multiplication by rack_gpu_count here, that would double-count it.
+        dp_throughput = 1
+        if per_gpu_decode_tps > 0 and total_streams > 0:
+            required_tps = total_streams * MIN_DECODE_TPS_PER_USER
+            dp_throughput = max(1, math.ceil(required_tps / per_gpu_decode_tps))
+
+        num_racks = max(dp_memory, dp_throughput)
+        gpu_count = rack_gpu_count * num_racks
+
+        strategy = (
+            "NVL72 unified fabric" if num_racks == 1
+            else f"NVL72 unified fabric ×{num_racks} racks (DP)"
+        )
+        # Inter-rack network hop cost — same treatment as inter-node IB hops
+        # on the standard multi-GPU path below.
+        penalty = min(0.5, 0.05 * (num_racks - 1)) if num_racks > 1 else 0.0
+
+        return TopologyResult(
+            gpu_count=gpu_count,
+            nodes=num_racks,
+            gpus_per_node=rack_gpu_count,
+            parallelism_strategy=strategy,
+            tp_degree=rack_gpu_count,
+            pp_degree=1,
+            dp_degree=num_racks,
+            effective_bandwidth_gb_s=(
+                gpu.rack_fabric_bw_tb_s * 1000 if gpu.rack_fabric_bw_tb_s else None
+            ),
+            cross_node_latency_penalty=penalty,
+        )
 
     # --- PCIe-based scaling (RTX PRO 6000 BSE) ---
     if gpu.interconnect_type == "PCIe":
@@ -534,6 +565,14 @@ def evaluate_gpu(
         num_experts=workload.num_experts,
         active_experts=workload.active_experts,
     )
+    # Rack-scale GPUs (NVL72 / Helios) are never deployed as a single card —
+    # size the sizing pass at a whole rack (matching how their calibration
+    # anchors are themselves defined, see calibration.py's
+    # RACK_SCALE_REFERENCE_GPUS) so calibrated_single_decode below means
+    # "one rack's single-stream decode", not "one GPU's".
+    sizing_gpu_count = (
+        gpu.rack_gpu_count if (gpu.is_rack_scale and gpu.rack_gpu_count) else 1
+    )
     perf_sizing = calculate_performance(
         params_b=workload.model_params_b,
         precision=workload.precision,
@@ -542,7 +581,7 @@ def evaluate_gpu(
         bf16_tflops=eff_gpu.bf16_tflops or 0,
         mem_bandwidth_tb_s=eff_gpu.mem_bandwidth_tb_s,
         hbm_capacity_gb=eff_gpu.hbm_capacity_gb,
-        gpu_count=1,
+        gpu_count=sizing_gpu_count,
         **moe_kwargs,
         # New Phase 4 parameters
         memory_gb=eff_gpu.memory_gb,
@@ -557,8 +596,9 @@ def evaluate_gpu(
         workload.context_length, workload.precision, workload.model_params_b
     )
 
-    # Calibrated single-GPU decode throughput for throughput-aware DP scaling
-    raw_single_gpu_decode = perf_sizing.decode_tokens_per_sec  # gpu_count=1
+    # Calibrated single-GPU (or single-rack, see sizing_gpu_count above)
+    # decode throughput for throughput-aware DP scaling.
+    raw_single_gpu_decode = perf_sizing.decode_tokens_per_sec
     calibrated_single_decode = calibrate_decode(
         gpu.name, raw_single_gpu_decode, workload.precision
     )

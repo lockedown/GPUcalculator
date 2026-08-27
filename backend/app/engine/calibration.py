@@ -51,8 +51,12 @@ REFERENCE_DECODE: dict[str, float] = {
     # Pre-GA extrapolations (Aug 2026) — see module docstring.
     "Vera Rubin NVL72": 560.0,
     "Rubin CPX": 45.0,     # GDDR7-bound (2 TB/s), not HBM — decode is not this card's job
-    "MI450X": 200.0,
-    "MI455X": 230.0,
+    "MI450X": 200.0,       # standalone card — per-GPU convention, like MI300X/350X/355X
+    # MI455X is rack-scale (RACK_SCALE_REFERENCE_GPUS below), so this is a
+    # full-72-GPU-rack single-stream figure like the NVL72 rows above, not a
+    # per-GPU number. Slightly above Vera Rubin NVL72's rack figure to match
+    # MI455X's higher disclosed HBM bandwidth (23.3 vs 22.0 TB/s).
+    "MI455X": 600.0,
 }
 
 # Ground-truth prefill K tok/s for Llama3-70B FP16
@@ -70,8 +74,9 @@ REFERENCE_PREFILL: dict[str, float] = {
     # Pre-GA extrapolations (Aug 2026) — see module docstring.
     "Vera Rubin NVL72": 210_000.0,
     "Rubin CPX": 95_000.0,  # compute/context-optimized — this is the card's actual job
-    "MI450X": 80_000.0,
-    "MI455X": 95_000.0,
+    "MI450X": 80_000.0,     # standalone card — per-GPU convention
+    # Full-rack figure, matched to Vera Rubin NVL72's — see decode comment above.
+    "MI455X": 220_000.0,
 }
 
 # FP8 multiplier over FP16 (from HTML "FP8 Quantised Throughput" row)
@@ -91,6 +96,19 @@ FP8_MULTIPLIER: dict[str, float] = {
     "Rubin CPX": 2.8,        # NVFP4 is this card's headline format
     "MI450X": 1.9,
     "MI455X": 2.0,
+}
+
+# GPUs whose REFERENCE_DECODE/REFERENCE_PREFILL anchor represents a full-rack
+# (72-GPU) single-stream figure, not a single card — must derive their raw
+# roofline baseline at gpu_count=72 to match. Checking "NVL72" in the name
+# covers NVIDIA's branding but silently missed MI455X (AMD's Helios rack,
+# also rack_gpu_count=72 in seed.py but no "NVL72" in its name) — that gap
+# let MI455X's calibration factor get computed at gpu_count=1 while
+# evaluate_gpu always evaluates it at gpu_count=72 (is_rack_scale=True),
+# producing a wildly wrong (too-high) calibrated decode/prefill whenever it's
+# actually deployed. Keep this set in sync with seed.py's rack-scale GPUs.
+RACK_SCALE_REFERENCE_GPUS: set[str] = {
+    "GB200 NVL72", "GB300 NVL72", "Vera Rubin NVL72", "MI455X",
 }
 
 
@@ -171,7 +189,7 @@ def get_decode_factor(gpu_name: str) -> float:
             s = specs.get(name)
             if s:
                 # For NVL72 rack-scale, reference is per-rack (72 GPUs aggregate)
-                gpu_count = 72 if "NVL72" in name else 1
+                gpu_count = 72 if name in RACK_SCALE_REFERENCE_GPUS else 1
                 raw = calc_decode_tokens_per_sec(
                     s["mem_bw"] * gpu_count, 70, "FP16",
                     context_length=REFERENCE_CONTEXT_LENGTH,
@@ -194,7 +212,7 @@ def get_prefill_factor(gpu_name: str) -> float:
         for name, ref in REFERENCE_PREFILL.items():
             s = specs.get(name)
             if s:
-                gpu_count = 72 if "NVL72" in name else 1
+                gpu_count = 72 if name in RACK_SCALE_REFERENCE_GPUS else 1
                 raw, _ = calc_prefill_tokens_per_sec(
                     s["bf16"] * gpu_count, 70, "FP16", s["mem_bw"] * gpu_count,
                     context_length=REFERENCE_CONTEXT_LENGTH,

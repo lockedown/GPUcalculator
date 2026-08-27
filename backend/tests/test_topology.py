@@ -62,10 +62,74 @@ class TestTopology:
             is_rack_scale=True,
             rack_gpu_count=72,
         )
-        # total_memory exceeds rack capacity → should NOT take rack path
+        # total_memory exceeds one rack's capacity → single-rack strategy label
+        # no longer applies (multi-rack DP scaling kicks in instead — see
+        # TestRackScaleMultiRack below).
         total_hbm = 192 * 72  # 13,824 GB
         topo = calc_topology(gpu, 100.0, total_hbm + 1)
         assert topo.parallelism_strategy != "NVL72 unified fabric"
+
+
+class TestRackScaleMultiRack:
+    """Rack-scale GPUs (NVL72 / Helios) are bought/deployed in whole-rack
+    units — a workload that exceeds one rack's memory OR throughput must
+    scale to multiple racks (DP across racks), not silently stay pinned at
+    exactly one rack regardless of load. Added after finding real production
+    scenarios (500 concurrent users, 405B model) where GB200/GB300/MI455X all
+    reported a flat 72 GPUs / ~$5-8M TCO — as if one rack could serve any
+    load — while non-rack GPUs correctly scaled to thousands of GPUs and
+    hundreds of millions in TCO for the identical workload.
+    """
+
+    def test_scales_to_multiple_racks_when_memory_exceeds_one_rack(self):
+        gpu = _mock_gpu(hbm_capacity_gb=192, is_rack_scale=True, rack_gpu_count=72)
+        total_hbm = 192 * 72
+        topo = calc_topology(gpu, 100.0, total_hbm * 2.5)  # needs 3 racks by memory
+        assert topo.dp_degree == 3
+        assert topo.gpu_count == 72 * 3
+        assert topo.nodes == 3
+        assert "3 racks" in topo.parallelism_strategy
+
+    def test_scales_to_multiple_racks_when_throughput_insufficient(self):
+        gpu = _mock_gpu(hbm_capacity_gb=192, is_rack_scale=True, rack_gpu_count=72)
+        # Memory fits one rack, but 1000 users at MIN_DECODE_TPS_PER_USER=10
+        # need 10,000 tok/s aggregate — far more than a tiny per-rack figure.
+        topo = calc_topology(
+            gpu, 100.0, 500.0,
+            concurrent_users=1000, batch_size=1,
+            per_gpu_decode_tps=5.0,  # calibrated whole-rack single-stream decode
+        )
+        assert topo.dp_degree > 1
+        assert topo.gpu_count == 72 * topo.dp_degree
+
+    def test_single_rack_still_returned_when_sufficient(self):
+        # Regression guard: small workload on a rack-scale GPU should still
+        # get the simple single-rack label, not multi-rack DP unnecessarily.
+        gpu = _mock_gpu(hbm_capacity_gb=192, is_rack_scale=True, rack_gpu_count=72)
+        topo = calc_topology(
+            gpu, 100.0, 500.0,
+            concurrent_users=1, batch_size=1,
+            per_gpu_decode_tps=1000.0,
+        )
+        assert topo.dp_degree == 1
+        assert topo.gpu_count == 72
+        assert topo.parallelism_strategy == "NVL72 unified fabric"
+
+    def test_tco_scales_with_rack_count(self):
+        # The real-world symptom this fixed: TCO must grow with rack count,
+        # not stay pinned near a single rack's price regardless of load.
+        from app.engine.cost import calc_tco
+
+        gpu = _mock_gpu(hbm_capacity_gb=192, is_rack_scale=True, rack_gpu_count=72)
+        topo_1 = calc_topology(gpu, 100.0, 500.0, per_gpu_decode_tps=1000.0)
+        topo_5 = calc_topology(
+            gpu, 100.0, 500.0,
+            concurrent_users=5000, batch_size=1, per_gpu_decode_tps=5.0,
+        )
+        assert topo_5.dp_degree > topo_1.dp_degree
+        tco_1 = calc_tco(gpu_count=topo_1.gpu_count, gpu_price_usd=50_000, tdp_watts=1200, tokens_per_sec=100)
+        tco_5 = calc_tco(gpu_count=topo_5.gpu_count, gpu_price_usd=50_000, tdp_watts=1200, tokens_per_sec=100)
+        assert tco_5.tco_36m_usd > tco_1.tco_36m_usd * 2
 
     # --- DP (concurrent users) ---
     def test_dp_single_user_no_dp(self):
