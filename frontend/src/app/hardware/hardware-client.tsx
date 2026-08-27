@@ -26,7 +26,7 @@ export default function HardwareClient({ initialGpus }: Props) {
       <div>
         <h1 className="text-xl font-bold tracking-tight text-gray-900">Hardware Catalog</h1>
         <p className="mt-1 text-sm text-gray-500">
-          All GPU specifications from the Finance GPU Benchmark Matrix (plus H100 SXM5 and RTX PRO 6000 BSE extras) — 10 GPUs across NVIDIA and AMD.
+          All GPU specifications from the Finance GPU Benchmark Matrix, plus extras not covered there (H100 SXM5, RTX PRO 6000 BSE, and next-gen pre-GA parts) — {initialGpus.length} GPUs across NVIDIA and AMD.
         </p>
       </div>
 
