@@ -55,13 +55,16 @@ class TestPricesEndpoint:
             dates = [p["date"] for p in gpu["prices"]]
             assert dates == sorted(dates), f"Prices not sorted for {gpu['gpu_name']}"
 
-    def test_h200_price_trend_declining(self):
-        """H200 should show a declining price trend over time."""
+    def test_h200_price_trend_declining_then_tightening(self):
+        """H200 dipped post-launch, then rose again as 2025-2026 supply tightened
+        (matches H100's own trend and Aug 2026 market pricing surveys — see
+        seed.py PRICE_DATA comments). No longer a monotonic decline."""
         r = client.get("/api/prices")
         h200 = next(g for g in r.json() if g["gpu_name"] == "H200 SXM")
         prices = [p["price_usd"] for p in h200["prices"]]
         assert len(prices) >= 3
-        assert prices[-1] < prices[0], "H200 price should decline over time"
+        assert prices[1] < prices[0], "H200 price should dip shortly after launch"
+        assert prices[-1] > prices[1], "H200 price should recover as 2025-2026 supply tightened"
 
 
 class TestExportEndpoint:
@@ -94,8 +97,9 @@ class TestExportEndpoint:
     def test_export_csv_has_all_gpus(self):
         r = client.post("/api/export/csv", json=self.WORKLOAD)
         lines = r.text.strip().split("\n")
-        # Header + 10 GPUs (8 from HTML + H100 SXM5 + RTX PRO 6000 BSE)
-        assert len(lines) == 11
+        # Header + 14 GPUs (8 from HTML + H100 SXM5, RTX PRO 6000 BSE,
+        # Vera Rubin NVL72, Rubin CPX, MI450X, MI455X)
+        assert len(lines) == 15
 
     def test_export_csv_includes_rack_data(self):
         r = client.post("/api/export/csv", json=self.WORKLOAD)

@@ -66,8 +66,11 @@ class TestParseHTMLFile:
         assert mi.vendor == "AMD"
 
     def test_estimated_gpus_flagged(self, parsed):
+        # B300 HGX, MI350X, MI355X shipped and were validated against official
+        # datasheets in Aug 2026 — only GB300 NVL72 remains an architectural
+        # projection (rack-scale figures not yet independently validated).
         est_names = [s.name for s in parsed["gpu_specs"] if s.is_estimated]
-        assert "B300 HGX" in est_names or len(est_names) >= 2
+        assert "GB300 NVL72" in est_names
 
     def test_benchmarks_extracted(self, parsed):
         assert len(parsed["benchmarks"]) >= 18  # At least 18 benchmark rows

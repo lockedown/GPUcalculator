@@ -28,7 +28,7 @@ from app.engine.calibration import (
 # below in the same commit. The two-step lockstep is the whole point — it
 # makes silent drift impossible.
 # ---------------------------------------------------------------------------
-_REFERENCE_DECODE_SNAPSHOT_2026_04_15: dict[str, float] = {
+_REFERENCE_DECODE_SNAPSHOT_2026_08_27: dict[str, float] = {
     "H100 SXM5": 40.0,
     "H200 SXM": 55.0,
     "B200 HGX": 115.0,
@@ -39,9 +39,14 @@ _REFERENCE_DECODE_SNAPSHOT_2026_04_15: dict[str, float] = {
     "MI300X": 70.0,
     "MI350X": 100.0,
     "MI355X": 118.0,
+    # Added Aug 2026 — pre-GA extrapolations, see calibration.py module docstring.
+    "Vera Rubin NVL72": 560.0,
+    "Rubin CPX": 45.0,
+    "MI450X": 200.0,
+    "MI455X": 230.0,
 }
 
-_REFERENCE_PREFILL_SNAPSHOT_2026_04_15: dict[str, float] = {
+_REFERENCE_PREFILL_SNAPSHOT_2026_08_27: dict[str, float] = {
     "H100 SXM5": 14_000.0,
     "H200 SXM": 20_000.0,
     "B200 HGX": 45_000.0,
@@ -52,6 +57,11 @@ _REFERENCE_PREFILL_SNAPSHOT_2026_04_15: dict[str, float] = {
     "MI300X": 22_000.0,
     "MI350X": 38_000.0,
     "MI355X": 46_000.0,
+    # Added Aug 2026 — pre-GA extrapolations, see calibration.py module docstring.
+    "Vera Rubin NVL72": 210_000.0,
+    "Rubin CPX": 95_000.0,
+    "MI450X": 80_000.0,
+    "MI455X": 95_000.0,
 }
 
 
@@ -72,14 +82,14 @@ class TestCalibrationFreshness:
         # the matching snapshot above, AND bump CALIBRATION_VERSION. A drift
         # without those three things in lockstep is exactly what this test
         # catches.
-        assert REFERENCE_DECODE == _REFERENCE_DECODE_SNAPSHOT_2026_04_15, (
+        assert REFERENCE_DECODE == _REFERENCE_DECODE_SNAPSHOT_2026_08_27, (
             "REFERENCE_DECODE drifted from the snapshot. If this is intentional, "
-            "update _REFERENCE_DECODE_SNAPSHOT_2026_04_15 (rename to today's "
+            "update _REFERENCE_DECODE_SNAPSHOT_2026_08_27 (rename to today's "
             "date) and bump CALIBRATION_VERSION in calibration.py."
         )
 
     def test_reference_prefill_matches_snapshot(self):
-        assert REFERENCE_PREFILL == _REFERENCE_PREFILL_SNAPSHOT_2026_04_15, (
+        assert REFERENCE_PREFILL == _REFERENCE_PREFILL_SNAPSHOT_2026_08_27, (
             "REFERENCE_PREFILL drifted from the snapshot. Same drill: update "
             "the snapshot + CALIBRATION_VERSION together."
         )
@@ -88,8 +98,8 @@ class TestCalibrationFreshness:
         # Sanity check that the snapshot didn't lose a GPU when calibration
         # was extended for a new SKU (which would be a drift in the other
         # direction — silent under-coverage).
-        assert set(_REFERENCE_DECODE_SNAPSHOT_2026_04_15) == set(REFERENCE_DECODE)
-        assert set(_REFERENCE_PREFILL_SNAPSHOT_2026_04_15) == set(REFERENCE_PREFILL)
+        assert set(_REFERENCE_DECODE_SNAPSHOT_2026_08_27) == set(REFERENCE_DECODE)
+        assert set(_REFERENCE_PREFILL_SNAPSHOT_2026_08_27) == set(REFERENCE_PREFILL)
 
 
 class TestCalibration:

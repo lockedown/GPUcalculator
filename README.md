@@ -113,7 +113,7 @@ DATABASE_URL="postgresql://user:pass@ep-xxx.neon.tech/dbname?sslmode=require" py
 | Endpoint | Method | Purpose |
 |---|---|---|
 | `/health` | GET | Health check with DB connectivity |
-| `/api/hardware` | GET | List all 9 GPUs with specs |
+| `/api/hardware` | GET | List all 14 GPUs with specs |
 | `/api/hardware/{id}` | GET | GPU detail + benchmarks + availability |
 | `/api/benchmarks` | GET | All benchmarks (filter: `?category=`, `?gpu_id=`) |
 | `/api/benchmarks/{category}` | GET | Benchmarks for a workload category |
@@ -129,9 +129,11 @@ DATABASE_URL="postgresql://user:pass@ep-xxx.neon.tech/dbname?sslmode=require" py
 
 ## GPUs Covered
 
-**NVIDIA (5):** H200 SXM5, B200 SXM, B300 SXM *(est.)*, GB200 NVL72, GB300 NVL72 *(est.)*
+**NVIDIA (9):** H100 SXM5, H200 SXM5, B200 SXM, B300 SXM, GB200 NVL72, GB300 NVL72 *(est.)*, RTX PRO 6000 BSE, Vera Rubin NVL72 *(est., pre-GA)*, Rubin CPX *(est., pre-GA)*
 
-**AMD (3):** MI300X, MI350X *(est.)*, MI355X *(est.)*
+**AMD (5):** MI300X, MI350X, MI355X, MI450X *(est., pre-GA)*, MI455X *(est., pre-GA — Helios rack-scale)*
+
+_(est.)_ marks specs not yet independently validated — either a pre-GA product (Vera Rubin NVL72, Rubin CPX, MI450X, MI455X) or GB300 NVL72's rack-scale figures. B300, MI350X, and MI355X shipped and were validated against official datasheets as of Aug 2026.
 
 ## Benchmark Categories
 

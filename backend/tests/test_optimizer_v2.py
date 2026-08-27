@@ -289,12 +289,15 @@ class TestBenchmarkBlending:
         w = WorkloadInput(model_params_b=70, finance_benchmark_category="tokenization")
         c = ConstraintInput()
         results = run_calculation(db, w, c)
-        # H100 SXM5 / RTX PRO 6000 BSE are seeded from extras and have no
-        # benchmark rows; everything from the HTML matrix should have scores.
+        # Extras-only GPUs (not from the HTML matrix) have no benchmark rows.
+        EXTRAS_ONLY = {
+            "H100 SXM5", "RTX PRO 6000 BSE",
+            "Vera Rubin NVL72", "Rubin CPX", "MI450X", "MI455X",
+        }
         html_seeded = [
             r for r in results
             if r.tokens_per_sec is not None
-            and r.gpu_name not in {"H100 SXM5", "RTX PRO 6000 BSE"}
+            and r.gpu_name not in EXTRAS_ONLY
         ]
         assert len(html_seeded) > 0
         for r in html_seeded:
@@ -440,7 +443,10 @@ class TestEvaluateGPU:
         assert result.kv_cache_gb is not None
 
     def test_estimated_gpu_has_warning(self, db):
-        gpu = db.query(GPU).filter(GPU.name == "MI350X").first()
+        # MI350X is now GA (validated Jun 2025) — use a still-pre-GA GPU.
+        # MI450X (not DLC-required, unlike Vera Rubin NVL72) so the default
+        # air-cooling constraint doesn't short-circuit before the pre-GA check.
+        gpu = db.query(GPU).filter(GPU.name == "MI450X").first()
         w = WorkloadInput(model_params_b=70)
         c = ConstraintInput()
         result = evaluate_gpu(db, gpu, w, c)
@@ -481,10 +487,11 @@ class TestRunComparison:
         c = ConstraintInput()
         resp = run_comparison(db, w, c)
         assert isinstance(resp, ComparisonResponse)
-        # 10 GPUs total: 8 from HTML (H200, B200, B300, GB200, GB300, MI300X,
-        # MI350X, MI355X) + H100 SXM5 + RTX PRO 6000 BSE seeded from extras.
+        # 14 GPUs total: 8 from HTML (H200, B200, B300, GB200, GB300, MI300X,
+        # MI350X, MI355X) + H100 SXM5, RTX PRO 6000 BSE, Vera Rubin NVL72,
+        # Rubin CPX, MI450X, MI455X seeded from extras.
         # B100 is parsed but excluded via EXCLUDED_GPUS.
-        assert len(resp.results) == 10
+        assert len(resp.results) == 14
         assert resp.sweet_spot_gpu is not None
 
     def test_results_sorted_by_composite(self, db):

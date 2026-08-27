@@ -12,8 +12,16 @@ Reference values (from `Finance GPU Benchmark Matrix.html`, Llama3-70B FP16):
   GB200 NVL72           200              82   (rack)
   GB300 NVL72           280             130   (est.)
   MI300X                 70              22
-  MI350X                100              38   (est.)
-  MI355X                118              46   (est.)
+  MI350X                100              38   (GA, validated Jun 2025 — see AMD datasheet)
+  MI355X                118              46   (GA, validated Jun 2025 — see AMD datasheet)
+
+Vera Rubin NVL72, Rubin CPX, MI450X, and MI455X (Helios) are pre-GA as of
+Aug 2026 — no independent benchmark data exists yet. Their reference rows
+below are extrapolated from disclosed HBM bandwidth / NVFP4 TFLOPS deltas
+over their predecessor, following the same generational-bump pattern as the
+GB200→GB300 and MI350X→MI355X rows. Expect a wider error band than the
+GA rows above; recalibrate once real serving benchmarks exist (same
+validation loop as validate_real_world_benchmarks.py at the repo root).
 """
 
 from __future__ import annotations
@@ -26,7 +34,7 @@ from __future__ import annotations
 # The `tests/test_calibration.py::test_reference_snapshot_unchanged` smoke
 # test holds REFERENCE_DECODE and REFERENCE_PREFILL pinned to the snapshot
 # below — bump the version + snapshot together when refreshing.
-CALIBRATION_VERSION = "2026-04-15"
+CALIBRATION_VERSION = "2026-08-27"
 
 # Ground-truth decode tok/s for Llama3-70B FP16 (batch=1, single GPU / rack unit)
 REFERENCE_DECODE: dict[str, float] = {
@@ -40,6 +48,11 @@ REFERENCE_DECODE: dict[str, float] = {
     "MI300X": 70.0,
     "MI350X": 100.0,
     "MI355X": 118.0,
+    # Pre-GA extrapolations (Aug 2026) — see module docstring.
+    "Vera Rubin NVL72": 560.0,
+    "Rubin CPX": 45.0,     # GDDR7-bound (2 TB/s), not HBM — decode is not this card's job
+    "MI450X": 200.0,
+    "MI455X": 230.0,
 }
 
 # Ground-truth prefill K tok/s for Llama3-70B FP16
@@ -54,6 +67,11 @@ REFERENCE_PREFILL: dict[str, float] = {
     "MI300X": 22_000.0,
     "MI350X": 38_000.0,
     "MI355X": 46_000.0,
+    # Pre-GA extrapolations (Aug 2026) — see module docstring.
+    "Vera Rubin NVL72": 210_000.0,
+    "Rubin CPX": 95_000.0,  # compute/context-optimized — this is the card's actual job
+    "MI450X": 80_000.0,
+    "MI455X": 95_000.0,
 }
 
 # FP8 multiplier over FP16 (from HTML "FP8 Quantised Throughput" row)
@@ -68,6 +86,11 @@ FP8_MULTIPLIER: dict[str, float] = {
     "MI300X": 1.0,           # Partial / marginal
     "MI350X": 1.7,
     "MI355X": 1.8,
+    # Pre-GA extrapolations (Aug 2026) — see module docstring.
+    "Vera Rubin NVL72": 2.6,
+    "Rubin CPX": 2.8,        # NVFP4 is this card's headline format
+    "MI450X": 1.9,
+    "MI455X": 2.0,
 }
 
 
@@ -108,9 +131,21 @@ def _gpu_specs() -> dict[str, dict]:
         "GB200 NVL72":        {"mem_bw": 8.0,  "bf16": 2250},  # per-GPU
         "GB300 NVL72":        {"mem_bw": 8.0,  "bf16": 2800},  # per-GPU
         "RTX PRO 6000 BSE":   {"mem_bw": 1.6,  "bf16": 480},
-        "MI300X":             {"mem_bw": 3.2,  "bf16": 1307},
-        "MI350X":             {"mem_bw": 6.0,  "bf16": 1800},
-        "MI355X":             {"mem_bw": 6.4,  "bf16": 2000},
+        # 5.3 TB/s per AMD's official platform page (8192-bit bus @ 5.2 Gbps) —
+        # was 3.2, which also disagreed with the HTML-sourced spec (Aug 2026 fix).
+        "MI300X":             {"mem_bw": 5.3,  "bf16": 1307},
+        # MI350X/MI355X: 8.0 TB/s per AMD's official MI350-series datasheet
+        # (both share the same 288GB HBM3e stack — TDP/clock is what differs).
+        "MI350X":             {"mem_bw": 8.0,  "bf16": 1800},
+        "MI355X":             {"mem_bw": 8.0,  "bf16": 2000},
+        # Pre-GA (Aug 2026) — disclosed HBM4/NVFP4 figures where available,
+        # BF16 derived via each family's own FP4:BF16 ratio (see seed.py
+        # GPU_EXTRA_DATA comments for the same derivation). Recalibrate once
+        # real serving benchmarks exist.
+        "Vera Rubin NVL72":   {"mem_bw": 22.0, "bf16": 6000},
+        "Rubin CPX":          {"mem_bw": 2.0,  "bf16": 3550},
+        "MI450X":             {"mem_bw": 23.3, "bf16": 10000},
+        "MI455X":             {"mem_bw": 23.3, "bf16": 11000},
     }
 
 

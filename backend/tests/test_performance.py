@@ -7,6 +7,8 @@ from app.engine.performance import (
     calc_prefill_tokens_per_sec,
     calc_decode_tokens_per_sec,
     calc_max_context_tokens,
+    calc_concurrent_users_support,
+    calc_interactive_ceiling,
     calculate_performance,
     get_model_arch,
     PRECISION_BYTES,
@@ -131,7 +133,9 @@ class TestLongContextDecode:
     """Decode tok/s should drop noticeably at long context due to KV reads."""
 
     def test_kv_read_term_slows_decode_at_128k(self):
-        # H200 70B FP16: 4K context KV is ~1% of model; 128K is ~30%.
+        # H200 70B FP16: 4K context KV is ~1% of model; 128K is ~30%, further
+        # discounted by KV_READ_BW_EFFICIENCY (paged KV reads < contiguous
+        # weight-read bandwidth — see validate_real_world_benchmarks.py).
         tps_short = calc_decode_tokens_per_sec(
             4.8, 70, "FP16",
             context_length=4096, num_layers=80, kv_dim=8 * 128,
@@ -140,9 +144,9 @@ class TestLongContextDecode:
             4.8, 70, "FP16",
             context_length=131072, num_layers=80, kv_dim=8 * 128,
         )
-        # 128K decode should be 20-35% slower than 4K
+        # 128K decode should be 30-45% slower than 4K
         ratio = tps_long / tps_short
-        assert 0.65 < ratio < 0.85
+        assert 0.55 < ratio < 0.70
 
     def test_no_context_falls_back_to_model_only(self):
         # Without context_length, behaves exactly like the legacy formula.
@@ -198,3 +202,164 @@ class TestCalculatePerformance:
             hbm_capacity_gb=141, gpu_count=2,
         )
         assert r2.decode_tokens_per_sec > r1.decode_tokens_per_sec
+
+
+class TestConcurrencyAwareThroughput:
+    """batch_size = concurrent sequences sharing one GPU group's BW/compute.
+
+    Added after validating against real vLLM serving benchmarks
+    (see validate_real_world_benchmarks.py at repo root): decode/prefill
+    tok/s previously ignored concurrency entirely, which meant the engine
+    couldn't predict the real-world throughput collapse under load that the
+    benchmark data clearly shows (measured decode tok/s dropped ~3x going
+    from 4 to 128 concurrent requests on H200/MI300X).
+    """
+
+    def test_decode_default_batch_size_unchanged(self):
+        # batch_size defaults to 1 — existing single-user calibration
+        # reference points (Llama3-70B @ 4K, batch=1) must stay unaffected.
+        legacy = calc_decode_tokens_per_sec(
+            4.8, 70, "FP16", context_length=4096, num_layers=80, kv_dim=8 * 128,
+        )
+        explicit = calc_decode_tokens_per_sec(
+            4.8, 70, "FP16", context_length=4096, num_layers=80, kv_dim=8 * 128,
+            batch_size=1,
+        )
+        assert explicit == legacy
+
+    def test_decode_drops_with_concurrency(self):
+        tps_1 = calc_decode_tokens_per_sec(
+            4.8, 70, "FP16", context_length=4096, num_layers=80, kv_dim=8 * 128,
+            batch_size=1,
+        )
+        tps_128 = calc_decode_tokens_per_sec(
+            4.8, 70, "FP16", context_length=4096, num_layers=80, kv_dim=8 * 128,
+            batch_size=128,
+        )
+        assert tps_128 < tps_1
+
+    def test_decode_without_context_is_batch_invariant(self):
+        # No context_length/arch → falls back to model-only bytes-per-token,
+        # which has no per-sequence KV term to scale with batch_size.
+        tps_1 = calc_decode_tokens_per_sec(4.8, 70, "FP16", batch_size=1)
+        tps_128 = calc_decode_tokens_per_sec(4.8, 70, "FP16", batch_size=128)
+        assert tps_128 == tps_1
+
+    def test_prefill_divides_with_concurrency(self):
+        tps_1, _ = calc_prefill_tokens_per_sec(989, 70, "FP16", 4.8, batch_size=1)
+        tps_4, _ = calc_prefill_tokens_per_sec(989, 70, "FP16", 4.8, batch_size=4)
+        assert tps_4 == pytest.approx(tps_1 / 4, rel=0.01)
+
+    def test_calculate_performance_wires_batch_size_to_throughput(self):
+        # calculate_performance already threaded batch_size into KV cache
+        # sizing; it must also reach decode/prefill throughput now.
+        r1 = calculate_performance(
+            params_b=70, precision="FP16", context_length=4096,
+            batch_size=1, bf16_tflops=989, mem_bandwidth_tb_s=4.8,
+            hbm_capacity_gb=141, gpu_count=1,
+        )
+        r64 = calculate_performance(
+            params_b=70, precision="FP16", context_length=4096,
+            batch_size=64, bf16_tflops=989, mem_bandwidth_tb_s=4.8,
+            hbm_capacity_gb=141, gpu_count=1,
+        )
+        assert r64.decode_tokens_per_sec < r1.decode_tokens_per_sec
+        assert r64.prefill_tokens_per_sec < r1.prefill_tokens_per_sec
+
+
+class TestTensorParallelCommLatency:
+    """Fixed per-collective latency at high TP degree (see _tp_comm_latency_s)."""
+
+    def test_single_gpu_unaffected(self):
+        # gpu_count=1 → no TP, no collectives, no latency term at all.
+        tps_1gpu = calc_decode_tokens_per_sec(
+            4.8, 70, "FP16", context_length=4096, num_layers=80, kv_dim=8 * 128, gpu_count=1,
+        )
+        legacy = calc_decode_tokens_per_sec(
+            4.8, 70, "FP16", context_length=4096, num_layers=80, kv_dim=8 * 128,
+        )
+        assert tps_1gpu == legacy
+
+    def test_high_tp_degree_slows_decode(self):
+        tps_1gpu = calc_decode_tokens_per_sec(
+            4.8 * 8, 10, "BF16", context_length=2048, num_layers=80, kv_dim=8 * 128, gpu_count=1,
+        )
+        tps_8gpu = calc_decode_tokens_per_sec(
+            4.8 * 8, 10, "BF16", context_length=2048, num_layers=80, kv_dim=8 * 128, gpu_count=8,
+        )
+        assert tps_8gpu < tps_1gpu
+
+    def test_high_tp_degree_slows_prefill(self):
+        tps_1gpu, _ = calc_prefill_tokens_per_sec(
+            989 * 8, 10, "BF16", 4.8 * 8, context_length=1024, num_layers=80, hidden_dim=8192, gpu_count=1,
+        )
+        tps_8gpu, _ = calc_prefill_tokens_per_sec(
+            989 * 8, 10, "BF16", 4.8 * 8, context_length=1024, num_layers=80, hidden_dim=8192, gpu_count=8,
+        )
+        assert tps_8gpu < tps_1gpu
+
+    def test_more_layers_more_latency(self):
+        # More layers = more collectives per step = more comm latency.
+        tps_shallow = calc_decode_tokens_per_sec(
+            4.8 * 8, 10, "BF16", context_length=2048, num_layers=20, kv_dim=8 * 128, gpu_count=8,
+        )
+        tps_deep = calc_decode_tokens_per_sec(
+            4.8 * 8, 10, "BF16", context_length=2048, num_layers=160, kv_dim=8 * 128, gpu_count=8,
+        )
+        assert tps_deep < tps_shallow
+
+
+class TestInteractiveCeiling:
+    """calc_concurrent_users_support has no latency-SLA concept — this does.
+
+    H200 141GB @ 70B FP8 (70GB weights, plenty of KV headroom) is used
+    throughout so the memory ceiling is generous and the latency ceiling is
+    the one doing the binding — isolated from the TP-comm-latency effect
+    covered separately in TestTensorParallelCommLatency.
+    """
+
+    def test_latency_ceiling_below_memory_ceiling_at_short_context(self):
+        # Real vLLM data: interactive ceiling is well below the memory-only
+        # estimate at short context (see validate_real_world_benchmarks.py).
+        result = calc_interactive_ceiling(
+            memory_gb=141, params_b=70, precision="FP8", context_length=2048,
+            bf16_tflops=989, mem_bandwidth_tb_s=4.8,
+        )
+        assert result.ceiling > 0
+        assert result.latency_ceiling < result.memory_ceiling
+        assert result.binding_constraint == "latency"
+
+    def test_zero_memory_ceiling_short_circuits(self):
+        # Model doesn't fit at all → both ceilings are 0, no crash.
+        result = calc_interactive_ceiling(
+            memory_gb=1, params_b=70, precision="FP16", context_length=4096,
+            bf16_tflops=989, mem_bandwidth_tb_s=4.8,
+        )
+        assert result.ceiling == 0
+        assert result.memory_ceiling == 0
+
+    def test_ceiling_is_monotonic_with_context_length(self):
+        # Longer context leaves less room per session (memory) and slower
+        # decode/prefill (latency) — ceiling should not increase with context.
+        short = calc_interactive_ceiling(
+            memory_gb=141, params_b=70, precision="FP8", context_length=2048,
+            bf16_tflops=989, mem_bandwidth_tb_s=4.8,
+        )
+        long = calc_interactive_ceiling(
+            memory_gb=141, params_b=70, precision="FP8", context_length=32768,
+            bf16_tflops=989, mem_bandwidth_tb_s=4.8,
+        )
+        assert long.ceiling <= short.ceiling
+
+    def test_relaxed_sla_raises_latency_ceiling(self):
+        strict = calc_interactive_ceiling(
+            memory_gb=141, params_b=70, precision="FP8", context_length=2048,
+            bf16_tflops=989, mem_bandwidth_tb_s=4.8,
+            ttft_sla_s=0.5, min_decode_tps_per_user=20.0,
+        )
+        relaxed = calc_interactive_ceiling(
+            memory_gb=141, params_b=70, precision="FP8", context_length=2048,
+            bf16_tflops=989, mem_bandwidth_tb_s=4.8,
+            ttft_sla_s=5.0, min_decode_tps_per_user=1.0,
+        )
+        assert relaxed.latency_ceiling >= strict.latency_ceiling

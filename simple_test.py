@@ -128,7 +128,7 @@ for name in ["H100 SXM5", "H200 SXM", "B200 HGX", "B300 HGX", "RTX PRO 6000 BSE"
 specs = _gpu_specs()
 check("B300 HGX mem_bw = 8.0 (not 16.0)", specs["B300 HGX"]["mem_bw"] == 8.0)
 check("GB300 NVL72 mem_bw = 8.0 (not 16.0)", specs["GB300 NVL72"]["mem_bw"] == 8.0)
-check("MI300X mem_bw = 3.2 (not 5.3)", specs["MI300X"]["mem_bw"] == 3.2)
+check("MI300X mem_bw = 5.3 (AMD official spec; was wrongly 3.2)", specs["MI300X"]["mem_bw"] == 5.3)
 check("H200 SXM bf16 = 1970 (not 989)", specs["H200 SXM"]["bf16"] == 1970)
 
 

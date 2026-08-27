@@ -10,6 +10,38 @@ PRECISION_BYTES = {
     "FP32": 4.0,
 }
 
+# Fixed latency per tensor-parallel collective (all-reduce), in seconds.
+# Small-message NCCL/RCCL all-reduces over NVLink/Infinity Fabric are
+# latency-bound, not bandwidth-bound — the actual bytes moved per collective
+# (a batch's worth of activations for one layer) are tiny relative to
+# 900 GB/s-class interconnects, so kernel-launch + synchronization latency
+# dominates, not transfer time. ~15us is the commonly cited ballpark for an
+# intra-node NVLink4/5 all-reduce. A standard TP transformer layer issues 2
+# collectives (post-attention, post-MLP), so this cost scales with
+# num_layers and is negligible at low gpu_count but adds up at high TP
+# degree — exactly the regime (8-way TP for a small-active-param MoE model)
+# where real serving throughput was measured well below the pure roofline
+# estimate. See validate_real_world_benchmarks.py.
+TP_COLLECTIVE_LATENCY_S = 15e-6
+TP_COLLECTIVES_PER_LAYER = 2
+
+# Effective HBM bandwidth for reading the KV cache, relative to the
+# contiguous bandwidth used for streaming model weights. Real serving
+# engines store the KV cache in fixed-size non-contiguous blocks (vLLM
+# PagedAttention, TRT-LLM paged KV) to avoid fragmentation — this trades
+# some effective bandwidth for that flexibility, via smaller transaction
+# sizes and pointer-chasing across blocks. ~50% is a conservative estimate;
+# it only affects long-context decode (the KV-read term is negligible vs.
+# model weights at short context, so this has ~no effect there).
+KV_READ_BW_EFFICIENCY = 0.5
+
+
+def _tp_comm_latency_s(gpu_count: int, num_layers: int | None) -> float:
+    """Fixed per-token latency from tensor-parallel collectives (seconds)."""
+    if gpu_count <= 1 or not num_layers:
+        return 0.0
+    return num_layers * TP_COLLECTIVES_PER_LAYER * TP_COLLECTIVE_LATENCY_S
+
 # Architecture shapes for representative production LLMs, keyed by total
 # parameter count in billions. ``get_model_arch`` matches by closest key.
 # Keys correspond to real shipping models:
@@ -100,6 +132,8 @@ def calc_prefill_tokens_per_sec(
     context_length: int | None = None,
     num_layers: int | None = None,
     hidden_dim: int | None = None,
+    batch_size: int = 1,
+    gpu_count: int = 1,
 ) -> tuple[float, bool]:
     """Prefill throughput estimate (tokens/sec).
 
@@ -111,6 +145,19 @@ def calc_prefill_tokens_per_sec(
 
     Without context_length / arch, falls back to the 2N-only model — accurate
     for short prompts, optimistic for long ones.
+
+    ``batch_size`` is the number of prompts being prefilled concurrently
+    (continuous batching). The GPU's compute/bandwidth pool is fixed, so
+    ``batch_size`` concurrent prefills divide it between them — per-request
+    throughput drops roughly proportionally to how many share the GPU at
+    once. This is a coarse model: it doesn't capture request queueing under
+    saturating load, so it still overstates real per-request throughput at
+    high concurrency (validated against real vLLM serving data — see
+    ``validate_real_world_benchmarks.py``).
+
+    ``gpu_count`` > 1 adds a fixed per-token tensor-parallel communication
+    latency (see ``_tp_comm_latency_s``) — real, not fitted, and only
+    material at high TP degree / many layers.
     """
     bytes_per_param = PRECISION_BYTES.get(precision, 2.0)
     effective_tflops = bf16_tflops
@@ -142,7 +189,17 @@ def calc_prefill_tokens_per_sec(
         mem_limit = (mem_bandwidth_tb_s * 1e12) / model_bytes
 
     is_compute_bound = compute_limit < mem_limit
-    tokens_per_sec = min(compute_limit, mem_limit)
+    tokens_per_sec = min(compute_limit, mem_limit) / max(1, batch_size)
+
+    # Unlike decode (one set of collectives per output token), prefill runs
+    # the whole prompt through in one forward pass — the collectives happen
+    # ONCE per request, not once per token, so the fixed comm latency is
+    # amortized across every token in the prompt (negligible unless prompts
+    # are very short).
+    comm_latency_s = _tp_comm_latency_s(gpu_count, num_layers)
+    if comm_latency_s > 0 and tokens_per_sec > 0:
+        comm_latency_per_token_s = comm_latency_s / max(1, context_length or 1)
+        tokens_per_sec = 1.0 / ((1.0 / tokens_per_sec) + comm_latency_per_token_s)
 
     return tokens_per_sec, is_compute_bound
 
@@ -155,17 +212,30 @@ def calc_decode_tokens_per_sec(
     context_length: int | None = None,
     num_layers: int | None = None,
     kv_dim: int | None = None,
+    batch_size: int = 1,
+    gpu_count: int = 1,
 ) -> float:
-    """Decode throughput estimate (tokens/sec).
+    """Decode throughput estimate (tokens/sec), per concurrent sequence.
 
-    Memory-bandwidth bound: every output token requires streaming the model
-    weights AND reading the full per-sequence KV cache from HBM.
+    Memory-bandwidth bound: every decode step reads the model weights ONCE
+    (continuous batching shares that read across every sequence in the step)
+    but reads EACH sequence's own KV cache from HBM. For ``batch_size``
+    concurrent sequences at the same context length:
 
-      tok/s = BW / (model_bytes + L × per_token_kv_bytes)
+      per-sequence tok/s = BW / (model_bytes + batch_size × L × per_token_kv_bytes / KV_READ_BW_EFFICIENCY)
 
-    The KV-read term is small at short context (<5% at 4K for L3-70B) but
-    dominates at long context (>30% at 128K). Without ``context_length``,
-    falls back to model-only — accurate for short context, optimistic above ~32K.
+    The KV-read term is small at short context/low concurrency but dominates
+    at long context or high concurrency, which is when real serving throughput
+    collapses well below the single-stream (``batch_size=1``) estimate —
+    validated against real vLLM serving data, see
+    ``validate_real_world_benchmarks.py``. The KV term is further discounted
+    by ``KV_READ_BW_EFFICIENCY`` since paged/blocked KV-cache reads don't
+    achieve the same effective bandwidth as the contiguous weight read.
+    Without ``context_length``, falls back to model-only — accurate for
+    short context, optimistic above ~32K or at high concurrency.
+
+    ``gpu_count`` > 1 adds a fixed per-token tensor-parallel communication
+    latency (see ``_tp_comm_latency_s``).
     """
     bytes_per_param = PRECISION_BYTES.get(precision, 2.0)
     model_bytes = params_b * 1e9 * bytes_per_param
@@ -173,11 +243,21 @@ def calc_decode_tokens_per_sec(
     bytes_per_token = model_bytes
     if context_length and num_layers and kv_dim:
         # Per-token KV-cache bytes: 2 (K+V) × layers × kv_dim × bytes_per_elem.
-        # Total KV streamed per output token: L × per-token-bytes.
+        # Total KV streamed per output token: L × per-token-bytes, read once
+        # per concurrent sequence sharing this decode step. Divided by
+        # KV_READ_BW_EFFICIENCY to reflect paged/non-contiguous KV access
+        # achieving less than the weight-read's contiguous bandwidth.
         kv_bytes_per_pos = 2 * num_layers * kv_dim * bytes_per_param
-        bytes_per_token += context_length * kv_bytes_per_pos
+        bytes_per_token += (
+            max(1, batch_size) * context_length * kv_bytes_per_pos / KV_READ_BW_EFFICIENCY
+        )
 
     tokens_per_sec = (mem_bandwidth_tb_s * 1e12) / bytes_per_token
+
+    comm_latency_s = _tp_comm_latency_s(gpu_count, num_layers)
+    if comm_latency_s > 0 and tokens_per_sec > 0:
+        tokens_per_sec = 1.0 / ((1.0 / tokens_per_sec) + comm_latency_s)
+
     return tokens_per_sec
 
 
@@ -332,18 +412,26 @@ def calculate_performance(
     # Pass arch + context so the long-context attention (prefill) and KV-read
     # (decode) terms are included.
     kv_dim = arch.get("num_kv_heads", arch["num_heads"]) * arch["head_dim"]
+    # batch_size here is the concurrent-sequence count sharing this GPU
+    # group's compute/bandwidth pool (see calc_decode_tokens_per_sec /
+    # calc_prefill_tokens_per_sec) — the same value already used above to
+    # size the KV cache for all concurrent sequences.
     prefill_tps, is_compute_bound = calc_prefill_tokens_per_sec(
         bf16_tflops * gpu_count, active_params_b, effective_precision,
         effective_bandwidth_tb_s * gpu_count,
         context_length=context_length,
         num_layers=arch["num_layers"],
         hidden_dim=arch["hidden_dim"],
+        batch_size=batch_size,
+        gpu_count=gpu_count,
     )
     decode_tps = calc_decode_tokens_per_sec(
         effective_bandwidth_tb_s * gpu_count, active_params_b, effective_precision,
         context_length=context_length,
         num_layers=arch["num_layers"],
         kv_dim=kv_dim,
+        batch_size=batch_size,
+        gpu_count=gpu_count,
     )
 
     max_ctx = calc_max_context_tokens(
@@ -361,3 +449,83 @@ def calculate_performance(
         is_compute_bound_prefill=is_compute_bound,
         is_memory_bw_bound_decode=True,
     )
+
+
+@dataclass
+class InteractiveCeilingResult:
+    memory_ceiling: int    # max concurrent sequences the VRAM can hold
+    latency_ceiling: int   # max concurrent sequences that stay under the SLA
+    ceiling: int           # min(memory_ceiling, latency_ceiling) — the real answer
+    binding_constraint: str  # "memory" or "latency" (whichever is smaller)
+
+
+def calc_interactive_ceiling(
+    memory_gb: float,
+    params_b: float,
+    precision: str,
+    context_length: int,
+    bf16_tflops: float,
+    mem_bandwidth_tb_s: float,
+    *,
+    gpu_count: int = 1,
+    ttft_sla_s: float = 1.5,
+    min_decode_tps_per_user: float = 5.0,
+) -> InteractiveCeilingResult:
+    """How many concurrent interactive sessions a GPU (group) can actually serve.
+
+    ``calc_concurrent_users_support`` answers "how many sessions' KV caches
+    fit in VRAM" — a pure capacity bound with no notion of latency. In
+    practice, real serving hits a latency SLA well before VRAM runs out:
+    real vLLM benchmarks (see validate_real_world_benchmarks.py) show the
+    "interactive ceiling" — sessions that stay under a P99 TTFT bound — is
+    routinely 4-6x lower than the memory-only estimate at short context.
+
+    This finds the largest ``batch_size`` (concurrent sessions) for which,
+    using the batch/TP-aware roofline above:
+      - prefill latency (context_length / prefill_tps) stays under ``ttft_sla_s``
+      - decode throughput per session stays at or above ``min_decode_tps_per_user``
+
+    and returns the smaller of that latency ceiling and the memory ceiling.
+    Uncalibrated (raw roofline), matching ``calc_concurrent_users_support``'s
+    own convention — callers wanting calibrated numbers should calibrate the
+    decode/prefill throughput before/after, not this ceiling directly.
+    """
+    memory_ceiling = calc_concurrent_users_support(memory_gb, params_b, precision, context_length)
+
+    if memory_ceiling <= 0:
+        return InteractiveCeilingResult(0, 0, 0, "memory")
+
+    arch = get_model_arch(params_b)
+    kv_dim = arch.get("num_kv_heads", arch["num_heads"]) * arch["head_dim"]
+
+    def meets_sla(n: int) -> bool:
+        prefill_tps, _ = calc_prefill_tokens_per_sec(
+            bf16_tflops * gpu_count, params_b, precision, mem_bandwidth_tb_s * gpu_count,
+            context_length=context_length, num_layers=arch["num_layers"], hidden_dim=arch["hidden_dim"],
+            batch_size=n, gpu_count=gpu_count,
+        )
+        decode_tps = calc_decode_tokens_per_sec(
+            mem_bandwidth_tb_s * gpu_count, params_b, precision,
+            context_length=context_length, num_layers=arch["num_layers"], kv_dim=kv_dim,
+            batch_size=n, gpu_count=gpu_count,
+        )
+        ttft_s = (context_length / prefill_tps) if prefill_tps > 0 else float("inf")
+        return ttft_s <= ttft_sla_s and decode_tps >= min_decode_tps_per_user
+
+    # Both latency terms degrade monotonically with n, so the SLA is met on a
+    # contiguous [1, k] prefix — binary search for the boundary k.
+    if not meets_sla(1):
+        latency_ceiling = 0
+    else:
+        lo, hi = 1, memory_ceiling
+        while lo < hi:
+            mid = (lo + hi + 1) // 2
+            if meets_sla(mid):
+                lo = mid
+            else:
+                hi = mid - 1
+        latency_ceiling = lo
+
+    ceiling = min(memory_ceiling, latency_ceiling)
+    binding = "latency" if latency_ceiling <= memory_ceiling else "memory"
+    return InteractiveCeilingResult(memory_ceiling, latency_ceiling, ceiling, binding)

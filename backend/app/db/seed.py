@@ -98,7 +98,10 @@ GPU_EXTRA_DATA = {
         "nvlink_topology": "nvswitch",
         "cooling_requirement": "DLC",
         "supported_workloads": ["inference", "training", "fine-tuning"],
-        "tdp_watts": 1200,
+        # TDP: AMD/NVIDIA-class liquid TBP — official NVIDIA B300 spec is 1400W (Aug 2026 research).
+        "tdp_watts": 1400,
+        # $53k spot quote (Spheron, Jul 2026) vs ~$37.5-43.75k per-GPU implied by
+        # DGX B300 8-GPU system pricing ($300-350k/8, Q1-Aug 2026) — 50k is the midpoint.
         "msrp_usd": 50000,
         "msrp_as_of": "2026-04-01",
         "cooling_type": "liquid",
@@ -107,7 +110,7 @@ GPU_EXTRA_DATA = {
         "max_gpus_per_node": 8,
         "is_rack_scale": False,
         "fp8_tflops": 5600,
-        "fp4_tflops": 15000,
+        "fp4_tflops": 15000,  # Official NVIDIA B300 spec: 15 PFLOPS FP4 (Aug 2026 research)
         "release_date": "2026-Q1",
     },
     "GB200 NVL72": {
@@ -121,9 +124,12 @@ GPU_EXTRA_DATA = {
         "cooling_requirement": "DLC",
         "supported_workloads": ["inference", "training", "fine-tuning"],
         "tdp_watts": 1200,
-        # Per-GPU equivalent: rack pricing $3.0-3.4M / 72 GPUs ≈ $42-47k.
-        "msrp_usd": 45000,
-        "msrp_as_of": "2026-04-01",
+        # Per-GPU equivalent, corrected Aug 2026: rack pricing $2-3M / 72 GPUs
+        # ≈ $27.8-41.7k (multiple market estimates — getdeploying, together.ai,
+        # moduledge, tech-insider); was overstated at $45k. NVIDIA doesn't
+        # publish MSRP for datacenter parts — this is a market-quote midpoint.
+        "msrp_usd": 38000,
+        "msrp_as_of": "2026-08-27",
         "cooling_type": "liquid",
         "intra_node_interconnect": "NVLink 5 (NVL72)",
         "interconnect_bw_gb_s": 1800,
@@ -146,9 +152,12 @@ GPU_EXTRA_DATA = {
         "cooling_requirement": "DLC",
         "supported_workloads": ["inference", "training", "fine-tuning"],
         "tdp_watts": 1400,
-        # Per-GPU equivalent: rack pricing $6.0-6.5M / 72 GPUs ≈ $83-90k.
-        "msrp_usd": 75000,
-        "msrp_as_of": "2026-04-01",
+        # Per-GPU equivalent, corrected Aug 2026: rack pricing $3-4M / 72 GPUs
+        # ≈ $41.7-55.6k (tech-insider.org NVIDIA Blackwell pricing survey,
+        # Jul 2026); was overstated at $75k against an unconfirmed $6-6.5M
+        # rack figure. Still a market estimate, not a published NVIDIA MSRP.
+        "msrp_usd": 48000,
+        "msrp_as_of": "2026-08-27",
         "cooling_type": "liquid",
         "intra_node_interconnect": "NVLink 5+ (NVL72)",
         "interconnect_bw_gb_s": 2000,
@@ -196,7 +205,10 @@ GPU_EXTRA_DATA = {
         "generation": "Instinct MI300",
         "memory_gb": 192,
         "memory_type": "HBM3",
-        "memory_bandwidth_tbps": 3.2,
+        # 5.325 TB/s per AMD's official platform page (8192-bit bus @ 5.2 Gbps) —
+        # was understated at 3.2. Matches the HTML-sourced mem_bandwidth_tb_s
+        # this field duplicates; the two had drifted apart (Aug 2026 fix).
+        "memory_bandwidth_tbps": 5.3,
         "supports_fp4": False,
         "interconnect_type": "IF v3",
         "nvlink_topology": "point_to_point",
@@ -214,47 +226,217 @@ GPU_EXTRA_DATA = {
         "release_date": "2024-Q1",
     },
     "MI350X": {
+        # Corrected Aug 2026 against AMD's official MI350X GPU datasheet
+        # (koicomputers.com mirror / amd.com product brief): 288GB (was 256),
+        # 8.0 TB/s (was 6.0), native MXFP4 support (was marked False), TBP
+        # 1000W (was 750). FP8/FP4 are AMD's disclosed *dense* MXFP8/MXFP4
+        # peak PFLOPS (4.6 / 9.2), not the 2:4-sparse figures.
         "generation": "Instinct MI350",
-        "memory_gb": 256,
+        "memory_gb": 288,
         "memory_type": "HBM3e",
-        "memory_bandwidth_tbps": 6.0,
-        "supports_fp4": False,
+        "memory_bandwidth_tbps": 8.0,
+        "supports_fp4": True,
         "interconnect_type": "IF v4",
         "nvlink_topology": "point_to_point",
         "cooling_requirement": "Any",
         "supported_workloads": ["inference", "training", "fine-tuning"],
-        "tdp_watts": 750,
-        "msrp_usd": 28000,
-        "msrp_as_of": "2026-04-01",
+        "tdp_watts": 1000,
+        # AMD MI350-series ~$25k after the 2025 price hike from ~$15k (UBS /
+        # multiple 2026 market reports) — was $28k, a touch high vs that figure.
+        "msrp_usd": 25000,
+        "msrp_as_of": "2026-08-27",
         "cooling_type": "air",
         "intra_node_interconnect": "Infinity Fabric v4",
-        "interconnect_bw_gb_s": 1500,
+        # 7 links x 153 GB/s peak per AMD's official datasheet (was 1500, a
+        # rack-fabric-scale figure that didn't match the per-GPU link spec).
+        "interconnect_bw_gb_s": 1071,
         "max_gpus_per_node": 8,
         "is_rack_scale": False,
-        "fp8_tflops": 3600,
+        "fp8_tflops": 4600,
+        "fp4_tflops": 9200,
         "release_date": "2025-H2",
     },
     "MI355X": {
+        # Corrected Aug 2026 against AMD's official MI355X GPU datasheet: 8.0
+        # TB/s (was 6.4, already matched the HTML-sourced spec but not this
+        # duplicate field), native MXFP4 (was False), TBP 1400W liquid (was
+        # 750). fp8/fp4 here are *dense* estimates — AMD's headline "10.1
+        # PFLOPS" figures are with 2:4 structured sparsity, which this engine
+        # deliberately doesn't mix into dense TFLOPS (see calibration.py).
         "generation": "Instinct MI355",
         "memory_gb": 288,
         "memory_type": "HBM3e",
-        "memory_bandwidth_tbps": 6.4,
-        "supports_fp4": False,
+        "memory_bandwidth_tbps": 8.0,
+        "supports_fp4": True,
         "interconnect_type": "IF v4",
+        "nvlink_topology": "point_to_point",
+        "cooling_requirement": "DLC",
+        "supported_workloads": ["inference", "training", "fine-tuning"],
+        "tdp_watts": 1400,
+        # AMD MI350-series flagship; $30k is the going estimate for the
+        # liquid-cooled MI355X (gpuadvisor.com, Aug 2026) vs MI350X's ~$25k.
+        "msrp_usd": 30000,
+        "msrp_as_of": "2026-08-27",
+        "cooling_type": "liquid",
+        "intra_node_interconnect": "Infinity Fabric v4",
+        "interconnect_bw_gb_s": 1071,
+        "max_gpus_per_node": 8,
+        "is_rack_scale": False,
+        "fp8_tflops": 5050,
+        "fp4_tflops": 10100,
+        "release_date": "2026-Q1",
+    },
+    # --- Next-gen flagships, added Aug 2026. All pre-GA — no independent
+    # benchmark data exists yet, so is_estimated=True throughout. Specs are
+    # a mix of officially disclosed figures (memory, FP4 TFLOPS, rack fabric
+    # bandwidth) and derived estimates (BF16/FP8 TFLOPS, TDP, pricing) —
+    # see individual comments below and calibration.py's matching REFERENCE_
+    # DECODE/PREFILL entries. Recalibrate once real serving data exists
+    # (same validation loop as validate_real_world_benchmarks.py).
+    "Vera Rubin NVL72": {
+        # Spec-equivalent fields (not in parsed HTML — built via _build_gpu_from_extra)
+        "vendor": "NVIDIA",
+        "form_factor": "NVL72",
+        "hbm_capacity_gb": 288,       # Officially disclosed (NVIDIA, Rubin CPX launch materials)
+        "hbm_type": "HBM4",
+        "mem_bandwidth_tb_s": 22.0,   # Officially disclosed, up to 22 TB/s per GPU
+        "fp64_tflops": None,          # Not disclosed
+        "is_estimated": True,
+        # Manual / extras
+        "generation": "Rubin",
+        "memory_gb": 288,
+        "memory_type": "HBM4",
+        "memory_bandwidth_tbps": 22.0,
+        "supports_fp4": True,
+        "interconnect_type": "NVLink 6",
+        "nvlink_topology": "nvl_fabric",
+        "cooling_requirement": "DLC",
+        "supported_workloads": ["inference", "training", "fine-tuning"],
+        "tdp_watts": 1800,  # Estimated — next-gen liquid-cooled increment over B300's 1400W
+        # No published NVIDIA pricing yet (pre-GA). Estimated as a premium
+        # step up from GB300 NVL72's corrected ~$48k/GPU, scaled by the
+        # disclosed ~2x NVFP4 compute jump. Treat as a placeholder.
+        "msrp_usd": 65000,
+        "msrp_as_of": "2026-08-27",
+        "cooling_type": "liquid",
+        "intra_node_interconnect": "NVLink 6 (NVL72)",
+        "interconnect_bw_gb_s": 3600,  # Estimated ~2x NVLink5 (no official per-GPU figure disclosed)
+        "max_gpus_per_node": 72,
+        "is_rack_scale": True,
+        "rack_gpu_count": 72,
+        "rack_fabric_bw_tb_s": 260,  # Officially disclosed: 260 TB/s aggregate scale-up (NVL72)
+        "bf16_tflops": 6000,   # Derived: 50 PFLOPS FP4 / ~8.44x (Blackwell's own FP4:BF16 ratio)
+        "fp8_tflops": 12000,   # Derived: ~2x BF16
+        "fp4_tflops": 50000,   # Officially disclosed: up to 50 PFLOPS NVFP4 inference, per-GPU
+        "release_date": "2026-H2",  # Full production Jun 2026; partner availability H2 2026
+    },
+    "Rubin CPX": {
+        # Spec-equivalent fields (not in parsed HTML — built via _build_gpu_from_extra)
+        "vendor": "NVIDIA",
+        "form_factor": "CPX",
+        "hbm_capacity_gb": 128,       # Officially disclosed: 128GB GDDR7 (not HBM — context-optimized card)
+        "hbm_type": "GDDR7",
+        # NVIDIA disclosed 1.7 PB/s for the full Vera Rubin NVL144 CPX *rack*
+        # (72 CPX + 72 Rubin GPUs), not a per-GPU figure. Estimated per-GPU
+        # via the same capacity:bandwidth ratio as RTX PRO 6000 BSE's GDDR7
+        # config (96GB/1.6TB/s) scaled to 128GB.
+        "mem_bandwidth_tb_s": 2.0,
+        "fp64_tflops": None,
+        "is_estimated": True,
+        # Manual / extras
+        "generation": "Rubin",
+        "memory_gb": 128,
+        "memory_type": "GDDR7",
+        "memory_bandwidth_tbps": 2.0,
+        "supports_fp4": True,
+        "interconnect_type": "NVLink 6",
+        "nvlink_topology": "nvl_fabric",
+        "cooling_requirement": "DLC",
+        "supported_workloads": ["inference"],  # Positioned for massive-context inference specifically
+        "tdp_watts": 1000,  # Estimated
+        "msrp_usd": 55000,  # Estimated — no published pricing (pre-GA)
+        "msrp_as_of": "2026-08-27",
+        "cooling_type": "liquid",
+        "intra_node_interconnect": "NVLink 6",
+        "interconnect_bw_gb_s": 3600,  # Estimated, same NVLink6 generation as Rubin NVL72
+        "max_gpus_per_node": 72,
+        "is_rack_scale": False,  # Deployed alongside Rubin GPUs in NVL144 racks, not a unified fabric of its own
+        "bf16_tflops": 3550,   # Derived via the same FP4:BF16 ratio as Rubin NVL72
+        "fp8_tflops": 7100,     # Derived: ~2x BF16
+        "fp4_tflops": 30000,    # Officially disclosed: 30 PFLOPS NVFP4, per-GPU
+        "release_date": "2026-Q4",  # Expected end of 2026 per NVIDIA
+    },
+    "MI450X": {
+        # Spec-equivalent fields (not in parsed HTML — built via _build_gpu_from_extra)
+        "vendor": "AMD",
+        "form_factor": "OAM",
+        "hbm_capacity_gb": 432,       # Officially disclosed (AMD MI400-series preview)
+        "hbm_type": "HBM4",
+        "mem_bandwidth_tb_s": 23.3,   # Officially disclosed, up to 23.3 TB/s (same HBM4 config as MI455X)
+        "fp64_tflops": None,
+        "is_estimated": True,
+        # Manual / extras
+        "generation": "Instinct MI450",
+        "memory_gb": 432,
+        "memory_type": "HBM4",
+        "memory_bandwidth_tbps": 23.3,
+        "supports_fp4": True,
+        "interconnect_type": "IF v5",
         "nvlink_topology": "point_to_point",
         "cooling_requirement": "Any",
         "supported_workloads": ["inference", "training", "fine-tuning"],
-        "tdp_watts": 750,
-        # UBS: AMD MI350-series ~$25k post-67% price hike; MI355X scaled slightly higher.
-        "msrp_usd": 26000,
-        "msrp_as_of": "2026-04-01",
+        "tdp_watts": 1000,  # Estimated — AMD describes MI450 as "lower power envelope" than MI455X's 1400W
+        # No published AMD pricing (pre-GA). Estimated as AMD's volume-tier
+        # successor to MI355X's corrected ~$30k, scaled to the disclosed
+        # ~2x HBM4 bandwidth/compute jump but priced below the MI455X flagship.
+        "msrp_usd": 48000,
+        "msrp_as_of": "2026-08-27",
         "cooling_type": "air",
-        "intra_node_interconnect": "Infinity Fabric v4",
-        "interconnect_bw_gb_s": 1600,
+        "intra_node_interconnect": "Infinity Fabric v5",
+        "interconnect_bw_gb_s": 1200,  # Estimated, modest bump over MI350-series' 1071
         "max_gpus_per_node": 8,
         "is_rack_scale": False,
-        "fp8_tflops": 4000,
-        "release_date": "2026-Q1",
+        "bf16_tflops": 10000,   # Derived: ~2x FP8 ratio (matches MI350-series' own FP4:FP8:BF16 pattern)
+        "fp8_tflops": 20000,    # Officially disclosed (AMD MI400-series preview): 20 PFLOPS FP8
+        "fp4_tflops": 40000,    # Officially disclosed: 40 PFLOPS FP4
+        "release_date": "2026-H2",  # AMD: "on track for 2H 2026" (Feb 2026 update)
+    },
+    "MI455X": {
+        # Spec-equivalent fields (not in parsed HTML — built via _build_gpu_from_extra)
+        "vendor": "AMD",
+        "form_factor": "OAM",
+        "hbm_capacity_gb": 432,       # Officially disclosed
+        "hbm_type": "HBM4",
+        "mem_bandwidth_tb_s": 23.3,   # Officially disclosed, up to 23.3 TB/s
+        "fp64_tflops": None,
+        "is_estimated": True,
+        # Manual / extras
+        "generation": "Instinct MI455 (Helios)",
+        "memory_gb": 432,
+        "memory_type": "HBM4",
+        "memory_bandwidth_tbps": 23.3,
+        "supports_fp4": True,
+        "interconnect_type": "IF v5",
+        "nvlink_topology": "point_to_point",
+        "cooling_requirement": "DLC",
+        "supported_workloads": ["inference", "training", "fine-tuning"],
+        "tdp_watts": 1400,  # Helios is liquid-cooled; matches MI350X→MI355X's own air/liquid split
+        # No published AMD pricing (pre-GA). Estimated at flagship-tier
+        # rack economics comparable to Rubin NVL72/GB300 NVL72's corrected
+        # per-GPU range.
+        "msrp_usd": 55000,
+        "msrp_as_of": "2026-08-27",
+        "cooling_type": "liquid",
+        "intra_node_interconnect": "Infinity Fabric v5",
+        "interconnect_bw_gb_s": 1200,
+        "max_gpus_per_node": 72,
+        "is_rack_scale": True,
+        "rack_gpu_count": 72,        # Helios rack: 72x MI455X (officially disclosed)
+        "rack_fabric_bw_tb_s": 43,   # Officially disclosed: 43 TB/s scale-out bandwidth (Helios rack)
+        "bf16_tflops": 11000,  # Derived: modest clock/TDP bump over MI450X, same pattern as MI350X→MI355X
+        "fp8_tflops": 22000,    # Estimated: MI450X's 20 PFLOPS + the same ~10% flagship bump as MI350X→MI355X
+        "fp4_tflops": 44000,    # Estimated: same treatment
+        "release_date": "2026-Q3",  # AMD: Helios shipments starting end of Q3 2026, ramping into 2027
     },
 }
 
@@ -284,13 +466,24 @@ AVAILABILITY_DATA = {
     "H100 SXM5": {"lead_time_weeks": 4, "supply_status": "available"},
     "H200 SXM": {"lead_time_weeks": 8, "supply_status": "available"},
     "B200 HGX": {"lead_time_weeks": 16, "supply_status": "constrained"},
-    "B300 HGX": {"lead_time_weeks": 40, "supply_status": "announced"},
+    # B300 launched 2026-Q1; DGX B300 systems confirmed shipping through
+    # Aug 2026 — no longer "announced". Blackwell allocation stays tight
+    # (most production absorbed by hyperscalers per Aug 2026 market reports).
+    "B300 HGX": {"lead_time_weeks": 12, "supply_status": "constrained"},
     "GB200 NVL72": {"lead_time_weeks": 24, "supply_status": "constrained"},
-    "GB300 NVL72": {"lead_time_weeks": 52, "supply_status": "announced"},
+    # GB300 NVL72 release window (2026-H2) is now — just starting to ramp.
+    "GB300 NVL72": {"lead_time_weeks": 20, "supply_status": "constrained"},
     "RTX PRO 6000 BSE": {"lead_time_weeks": 8, "supply_status": "available"},
     "MI300X": {"lead_time_weeks": 6, "supply_status": "available"},
-    "MI350X": {"lead_time_weeks": 20, "supply_status": "announced"},
-    "MI355X": {"lead_time_weeks": 36, "supply_status": "announced"},
+    # MI350X/MI355X both launched 2025-06-12 (AMD official) — over a year of
+    # market history by Aug 2026, no longer "announced".
+    "MI350X": {"lead_time_weeks": 8, "supply_status": "available"},
+    "MI355X": {"lead_time_weeks": 8, "supply_status": "available"},
+    # Pre-GA next-gen flagships, added Aug 2026 — see GPU_EXTRA_DATA comments.
+    "Vera Rubin NVL72": {"lead_time_weeks": 32, "supply_status": "announced"},
+    "Rubin CPX": {"lead_time_weeks": 16, "supply_status": "announced"},
+    "MI450X": {"lead_time_weeks": 16, "supply_status": "announced"},
+    "MI455X": {"lead_time_weeks": 12, "supply_status": "constrained"},  # Helios in full production, ramping Q3 2026
 }
 
 
@@ -490,6 +683,7 @@ def seed_price_history(db: Session, gpu_map: dict[str, GPU]):
             ("2025-01-01", 23000, "market"),
             ("2025-07-01", 27000, "market"),     # tightening 2025 supply
             ("2026-04-01", 30000, "market"),     # 2026 channel reality
+            ("2026-08-01", 30000, "market"),     # holding steady per Aug 2026 pricing surveys
         ],
         "H200 SXM": [
             ("2024-01-01", 32000, "msrp"),
@@ -497,17 +691,22 @@ def seed_price_history(db: Session, gpu_map: dict[str, GPU]):
             ("2025-01-01", 28000, "market"),
             ("2025-07-01", 29000, "market"),
             ("2026-04-01", 30000, "market"),
+            ("2026-08-01", 35000, "market"),     # $30-40k street range (jarvislabs.ai, Aug 2026); midpoint used
         ],
         "B200 HGX": [
             ("2024-10-01", 42000, "msrp"),
             ("2025-04-01", 41000, "market"),
             ("2025-10-01", 40000, "market"),
             ("2026-04-01", 40000, "market"),
+            # Aug 2026: OEM quotes $45-50k, street quotes $30-40k — wide spread
+            # from hyperscaler-driven scarcity (thundercompute.com / tech-insider.org).
+            ("2026-08-01", 42000, "market"),
         ],
         "B300 HGX": [
             ("2025-10-01", 52000, "estimate"),
             ("2026-01-01", 50000, "msrp"),
             ("2026-04-01", 50000, "market"),
+            ("2026-08-01", 51000, "market"),     # ~$53k spot quotes vs ~$40k DGX-implied — midpoint held near msrp
         ],
         "GB200 NVL72": [
             # Per-GPU equivalent of full NVL72 rack pricing (rack ÷ 72)
@@ -515,17 +714,26 @@ def seed_price_history(db: Session, gpu_map: dict[str, GPU]):
             ("2025-04-01", 47000, "market"),
             ("2025-10-01", 46000, "market"),
             ("2026-04-01", 45000, "market"),     # ~$3.24M rack
+            # Corrected Aug 2026: multiple market estimates put the rack at
+            # $2-3M (getdeploying.com / together.ai / moduledge.com), ≈$27.8-
+            # 41.7k/GPU — the $45k series above was overstated.
+            ("2026-08-01", 38000, "market"),
         ],
         "GB300 NVL72": [
-            # Per-GPU equivalent of $5.4–6.5M rack pricing
-            ("2025-10-01", 80000, "estimate"),
-            ("2026-01-01", 75000, "msrp"),       # ~$5.4M rack at launch
-            ("2026-04-01", 75000, "market"),
+            # Per-GPU equivalent, corrected Aug 2026 — see msrp_usd comment above.
+            ("2025-10-01", 55000, "estimate"),
+            ("2026-01-01", 50000, "msrp"),
+            ("2026-04-01", 48000, "market"),
+            # $3-4M rack (tech-insider.org NVIDIA Blackwell pricing survey,
+            # Jul 2026) ≈ $41.7-55.6k/GPU — the prior $75-80k series was
+            # based on an unconfirmed $6-6.5M rack figure.
+            ("2026-08-01", 48000, "market"),
         ],
         "RTX PRO 6000 BSE": [
             ("2025-01-01", 9000, "msrp"),
             ("2025-04-01", 8500, "market"),
             ("2026-04-01", 8500, "market"),
+            ("2026-08-01", 8500, "market"),
         ],
         "MI300X": [
             ("2024-01-01", 15000, "msrp"),
@@ -533,16 +741,32 @@ def seed_price_history(db: Session, gpu_map: dict[str, GPU]):
             ("2025-01-01", 11000, "market"),
             ("2025-07-01", 22000, "market"),     # AMD price hike (UBS)
             ("2026-04-01", 22000, "market"),
+            ("2026-08-01", 22000, "market"),
         ],
         "MI350X": [
-            ("2025-07-01", 28000, "estimate"),
-            ("2025-10-01", 28000, "msrp"),
-            ("2026-04-01", 28000, "market"),
+            ("2025-07-01", 15000, "estimate"),   # pre-hike
+            ("2025-10-01", 25000, "market"),     # AMD's ~67% MI350-series price hike (citizenwatchreport, 2025)
+            ("2026-04-01", 25000, "market"),
+            ("2026-08-01", 25000, "market"),
         ],
         "MI355X": [
             ("2025-10-01", 28000, "estimate"),
             ("2026-01-01", 26000, "msrp"),
             ("2026-04-01", 26000, "market"),
+            ("2026-08-01", 30000, "market"),     # gpuadvisor.com estimate, Aug 2026
+        ],
+        # Pre-GA next-gen flagships — single estimate point, no market history yet.
+        "Vera Rubin NVL72": [
+            ("2026-08-01", 65000, "estimate"),
+        ],
+        "Rubin CPX": [
+            ("2026-08-01", 55000, "estimate"),
+        ],
+        "MI450X": [
+            ("2026-08-01", 48000, "estimate"),
+        ],
+        "MI455X": [
+            ("2026-08-01", 55000, "estimate"),
         ],
     }
 

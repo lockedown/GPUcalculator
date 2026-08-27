@@ -1,0 +1,4 @@
+# Dev/validation-only deps — NOT installed in the Vercel serverless function
+# (keep out of requirements.txt to avoid bloating the deployed bundle).
+-r requirements.txt
+openpyxl==3.1.5

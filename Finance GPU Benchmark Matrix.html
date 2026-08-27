@@ -179,12 +179,12 @@
     <div class="gpu-chip"><div class="gpu-dot" style="background:var(--h200)"></div><span>H200 SXM5</span><span class="gpu-sub">141GB HBM3e · 4.8TB/s · 989 BF16 TFLOPS · 67 FP64</span></div>
     <div class="gpu-chip"><div class="gpu-dot" style="background:var(--b100)"></div><span>B100 SXM</span><span class="gpu-sub">192GB HBM3e · 8TB/s · 1.8 PF BF16 · 90 FP64</span></div>
     <div class="gpu-chip"><div class="gpu-dot" style="background:var(--b200)"></div><span>B200 SXM</span><span class="gpu-sub">192GB HBM3e · 8TB/s · 2.25 PF BF16 · 112 FP64</span></div>
-    <div class="gpu-chip"><div class="gpu-dot" style="background:var(--b300)"></div><span>B300 SXM</span><span class="gpu-sub">288GB HBM3e · 16TB/s · ~2.8 PF BF16 · ~140 FP64</span><span class="est-badge">est</span></div>
+    <div class="gpu-chip"><div class="gpu-dot" style="background:var(--b300)"></div><span>B300 SXM</span><span class="gpu-sub">288GB HBM3e · 8TB/s · ~2.8 PF BF16 · ~140 FP64</span></div>
     <div class="gpu-chip"><div class="gpu-dot" style="background:var(--gb200)"></div><span>GB200 NVL72</span><span class="gpu-sub">192GB · 8TB/s · 2.5 PF BF16 (rack) · NVL72 130TB/s</span></div>
-    <div class="gpu-chip"><div class="gpu-dot" style="background:var(--gb300)"></div><span>GB300 NVL72</span><span class="gpu-sub">288GB · 16TB/s · ~4 PF BF16 (rack) · NVL72 ~200TB/s</span><span class="est-badge">est</span></div>
+    <div class="gpu-chip"><div class="gpu-dot" style="background:var(--gb300)"></div><span>GB300 NVL72</span><span class="gpu-sub">288GB · 8TB/s · ~4 PF BF16 (rack) · NVL72 ~200TB/s</span><span class="est-badge">est</span></div>
     <div class="gpu-chip"><div class="gpu-dot" style="background:var(--mi300x)"></div><span>MI300X</span><span class="gpu-sub">192GB HBM3 · 5.3TB/s · 1.3 PF BF16 · 84 FP64</span></div>
-    <div class="gpu-chip"><div class="gpu-dot" style="background:var(--mi350x)"></div><span>MI350X</span><span class="gpu-sub">288GB HBM3e · ~8TB/s · ~1.8 PF BF16 · ~108 FP64</span><span class="est-badge">est</span></div>
-    <div class="gpu-chip"><div class="gpu-dot" style="background:var(--mi355x)"></div><span>MI355X</span><span class="gpu-sub">288GB HBM3e · ~8TB/s · ~2.0 PF BF16 · ~116 FP64</span><span class="est-badge">est</span></div>
+    <div class="gpu-chip"><div class="gpu-dot" style="background:var(--mi350x)"></div><span>MI350X</span><span class="gpu-sub">288GB HBM3e · 8TB/s · ~1.8 PF BF16 · ~108 FP64</span></div>
+    <div class="gpu-chip"><div class="gpu-dot" style="background:var(--mi355x)"></div><span>MI355X</span><span class="gpu-sub">288GB HBM3e · 8TB/s · ~2.0 PF BF16 · ~116 FP64</span></div>
   </div>
 
   <div class="filters">
@@ -217,12 +217,12 @@
           <th class="gpu-col h200-col  nv-col">H200 SXM5</th>
           <th class="gpu-col b100-col  nv-col">B100 SXM</th>
           <th class="gpu-col b200-col  nv-col">B200 SXM</th>
-          <th class="gpu-col b300-col  nv-col">B300 SXM ⚠</th>
+          <th class="gpu-col b300-col  nv-col">B300 SXM</th>
           <th class="gpu-col gb200-col nv-col">GB200 NVL72</th>
           <th class="gpu-col gb300-col nv-col">GB300 NVL72 ⚠</th>
           <th class="gpu-col mi300x-col amd-col">MI300X</th>
-          <th class="gpu-col mi350x-col amd-col">MI350X ⚠</th>
-          <th class="gpu-col mi355x-col amd-col">MI355X ⚠</th>
+          <th class="gpu-col mi350x-col amd-col">MI350X</th>
+          <th class="gpu-col mi355x-col amd-col">MI355X</th>
         </tr>
       </thead>
       <tbody>
@@ -736,11 +736,11 @@
   </div>
 
   <div class="footnote">
-    <strong>Tokenization data notes:</strong> Prefill and decode throughput figures for Llama3-70B at FP16/BF16 (or FP8 where noted) derived from published vLLM benchmarks, TensorRT-LLM benchmarks, MLPerf Inference v4 server results, and NVIDIA/AMD product disclosures. KV cache slot estimates assume 128K context window with KV cache in BF16 at 70B parameter model (approx. 16GB per 128K slot at BF16). Max context estimates assume full KV in-VRAM without offloading. TTFT (time-to-first-token) estimates for 4K token prompt on a single GPU without tensor parallelism. <strong style="color:#b54200">⚠ B300, GB300, MI350X, MI355X tokenization figures are architectural projections — not independently validated.</strong> FP8 throughput multipliers are indicative; real-world uplift depends on model architecture, quantisation quality, and serving framework maturity (TRT-LLM vs vLLM vs ROCm). AMD FP8 support on MI300X is partial via ROCm; MI350X/MI355X FP8 support assumed full but unconfirmed. NVL72 context estimates assume unified fabric KV cache distribution across all 72 GPUs.
+    <strong>Tokenization data notes:</strong> Prefill and decode throughput figures for Llama3-70B at FP16/BF16 (or FP8 where noted) derived from published vLLM benchmarks, TensorRT-LLM benchmarks, MLPerf Inference v4 server results, and NVIDIA/AMD product disclosures. KV cache slot estimates assume 128K context window with KV cache in BF16 at 70B parameter model (approx. 16GB per 128K slot at BF16). Max context estimates assume full KV in-VRAM without offloading. TTFT (time-to-first-token) estimates for 4K token prompt on a single GPU without tensor parallelism. <strong>Update (Aug 2026): B300, MI350X, MI355X have since shipped and their figures are validated against AMD/NVIDIA datasheets.</strong> <strong style="color:#b54200">⚠ GB300 NVL72 tokenization figures remain an architectural projection — not yet independently validated at rack scale.</strong> FP8 throughput multipliers are indicative; real-world uplift depends on model architecture, quantisation quality, and serving framework maturity (TRT-LLM vs vLLM vs ROCm). AMD FP8 support on MI300X is partial via ROCm; MI350X/MI355X now have confirmed full FP8 support per AMD's CDNA4 datasheets. NVL72 context estimates assume unified fabric KV cache distribution across all 72 GPUs.
   </div>
 
   <div class="footnote">
-    <strong>Data sourcing &amp; caveats (benchmark matrix):</strong> NVIDIA H200, B100, B200, GB200 figures from published NVIDIA whitepapers, MLCommons MLPerf v4 results, GTC 2024/2025 announcements, and NVIDIA product briefs. AMD MI300X from AMD product brief and published MLPerf submissions. <strong style="color:#b54200">⚠ B300, GB300, MI350X, MI355X figures are architectural projections (marked est.) — not yet validated in independent third-party benchmarks.</strong> Relative multipliers (×H200) are indicative for workload planning and not a substitute for PoC testing. Note: GB200/GB300 NVL72 per-GPU FP64 figures match B100/B300 respectively — their advantage is NVL72 rack-scale fabric (130–200TB/s), not per-GPU FP64 uplift. AMD Infinity Fabric bandwidth does not match NVLink NVL72 at rack scale — a significant architectural distinction for large-model finance workloads. Regulatory overlay is informational; compliance requirements should be validated with legal and risk teams. Prepared by WWT Enterprise Advisory for client planning purposes.
+    <strong>Data sourcing &amp; caveats (benchmark matrix):</strong> NVIDIA H200, B100, B200, GB200, B300 figures from published NVIDIA whitepapers, MLCommons MLPerf v4 results, GTC 2024/2025/2026 announcements, and NVIDIA product briefs/datasheets. AMD MI300X, MI350X, MI355X from AMD product briefs, official CDNA4 datasheets, and published MLPerf submissions. <strong style="color:#b54200">⚠ GB300 NVL72 figures remain an architectural projection (marked est.) — not yet validated in independent third-party benchmarks at rack scale.</strong> Relative multipliers (×H200) are indicative for workload planning and not a substitute for PoC testing. Note: GB200/GB300 NVL72 per-GPU FP64 figures match B100/B300 respectively — their advantage is NVL72 rack-scale fabric (130–200TB/s), not per-GPU FP64 uplift. AMD Infinity Fabric bandwidth does not match NVLink NVL72 at rack scale — a significant architectural distinction for large-model finance workloads. Regulatory overlay is informational; compliance requirements should be validated with legal and risk teams. Prepared by WWT Enterprise Advisory for client planning purposes.
   </div>
 
 </div>
