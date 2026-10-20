@@ -49,6 +49,11 @@ from dataclasses import dataclass
 from datetime import date
 
 
+# Mirrors PriceHistory.source String(50). Postgres enforces it (SQLite doesn't),
+# so check up front rather than failing mid-write against Neon.
+MAX_SOURCE_LEN = 50
+
+
 @dataclass
 class GpuPriceUpdate:
     name: str
@@ -77,6 +82,11 @@ def parse_payload(raw: dict) -> RefreshPayload:
     source = raw.get("source", "manual refresh")
     if not isinstance(source, str) or not source.strip():
         raise ValueError("'source' must be a non-empty string")
+    if len(source.strip()) > MAX_SOURCE_LEN:
+        raise ValueError(
+            f"'source' must be at most {MAX_SOURCE_LEN} characters "
+            f"(got {len(source.strip())}); price_history.source is VARCHAR({MAX_SOURCE_LEN})"
+        )
 
     gpus_raw = raw.get("gpus")
     if not isinstance(gpus_raw, list) or not gpus_raw:

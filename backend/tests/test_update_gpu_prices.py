@@ -42,6 +42,22 @@ class TestParsePayload:
         })
         assert p.source == "manual refresh"
 
+    def test_rejects_source_longer_than_column(self):
+        with pytest.raises(ValueError, match="at most 50 characters"):
+            parse_payload({
+                "as_of": "2026-08-15",
+                "source": "x" * 51,
+                "gpus": [{"name": "MI300X", "msrp_usd": 21000}],
+            })
+
+    def test_accepts_source_at_column_limit(self):
+        p = parse_payload({
+            "as_of": "2026-08-15",
+            "source": "x" * 50,
+            "gpus": [{"name": "MI300X", "msrp_usd": 21000}],
+        })
+        assert len(p.source) == 50
+
     def test_rejects_non_dict_root(self):
         with pytest.raises(ValueError, match="must be a JSON object"):
             parse_payload([])  # type: ignore[arg-type]
