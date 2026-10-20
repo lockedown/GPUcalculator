@@ -34,9 +34,9 @@ GPU_EXTRA_DATA = {
         "cooling_requirement": "Any",
         "supported_workloads": ["inference", "training", "fine-tuning"],
         "tdp_watts": 700,
-        # 2026 SXM5 channel reality is $30-35k; was $25k at 2024 launch.
-        "msrp_usd": 30000,
-        "msrp_as_of": "2026-04-01",
+        # Oct 2026 surveys: ~$31k new card (range $25-40k); was $25k at 2024 launch.
+        "msrp_usd": 31000,
+        "msrp_as_of": "2026-10-20",
         "cooling_type": "air",
         "intra_node_interconnect": "NVLink 4",
         "interconnect_bw_gb_s": 900,
@@ -56,8 +56,8 @@ GPU_EXTRA_DATA = {
         "cooling_requirement": "Any",
         "supported_workloads": ["inference", "training", "fine-tuning"],
         "tdp_watts": 700,
-        "msrp_usd": 30000,
-        "msrp_as_of": "2026-04-01",
+        "msrp_usd": 38000,
+        "msrp_as_of": "2026-10-20",
         "cooling_type": "air",
         "intra_node_interconnect": "NVLink 4",
         "interconnect_bw_gb_s": 900,
@@ -100,10 +100,9 @@ GPU_EXTRA_DATA = {
         "supported_workloads": ["inference", "training", "fine-tuning"],
         # TDP: AMD/NVIDIA-class liquid TBP — official NVIDIA B300 spec is 1400W (Aug 2026 research).
         "tdp_watts": 1400,
-        # $53k spot quote (Spheron, Jul 2026) vs ~$37.5-43.75k per-GPU implied by
-        # DGX B300 8-GPU system pricing ($300-350k/8, Q1-Aug 2026) — 50k is the midpoint.
-        "msrp_usd": 50000,
-        "msrp_as_of": "2026-04-01",
+        # Oct 2026 estimates cluster ~$53k/GPU (gpubattle, intuitionlabs).
+        "msrp_usd": 53000,
+        "msrp_as_of": "2026-10-20",
         "cooling_type": "liquid",
         "intra_node_interconnect": "NVLink 5+",
         "interconnect_bw_gb_s": 2000,
@@ -124,12 +123,11 @@ GPU_EXTRA_DATA = {
         "cooling_requirement": "DLC",
         "supported_workloads": ["inference", "training", "fine-tuning"],
         "tdp_watts": 1200,
-        # Per-GPU equivalent, corrected Aug 2026: rack pricing $2-3M / 72 GPUs
-        # ≈ $27.8-41.7k (multiple market estimates — getdeploying, together.ai,
-        # moduledge, tech-insider); was overstated at $45k. NVIDIA doesn't
-        # publish MSRP for datacenter parts — this is a market-quote midpoint.
-        "msrp_usd": 38000,
-        "msrp_as_of": "2026-08-27",
+        # Per-GPU equivalent, Oct 2026: SemiAnalysis ~$3.1M bare rack / 72 ≈ $43k
+        # ($54k all-in). NVIDIA doesn't publish MSRP for datacenter parts — this
+        # is a market estimate.
+        "msrp_usd": 43000,
+        "msrp_as_of": "2026-10-20",
         "cooling_type": "liquid",
         "intra_node_interconnect": "NVLink 5 (NVL72)",
         "interconnect_bw_gb_s": 1800,
@@ -152,12 +150,11 @@ GPU_EXTRA_DATA = {
         "cooling_requirement": "DLC",
         "supported_workloads": ["inference", "training", "fine-tuning"],
         "tdp_watts": 1400,
-        # Per-GPU equivalent, corrected Aug 2026: rack pricing $3-4M / 72 GPUs
-        # ≈ $41.7-55.6k (tech-insider.org NVIDIA Blackwell pricing survey,
-        # Jul 2026); was overstated at $75k against an unconfirmed $6-6.5M
-        # rack figure. Still a market estimate, not a published NVIDIA MSRP.
-        "msrp_usd": 48000,
-        "msrp_as_of": "2026-08-27",
+        # Per-GPU equivalent, Oct 2026: Loop Capital $3.7-4.0M rack / 72 ≈ $51-56k.
+        # Tom's Hardware reported $6-6.5M (≈ $83-90k) — unresolved high case.
+        # Market estimate, not a published NVIDIA MSRP.
+        "msrp_usd": 55000,
+        "msrp_as_of": "2026-10-20",
         "cooling_type": "liquid",
         "intra_node_interconnect": "NVLink 5+ (NVL72)",
         "interconnect_bw_gb_s": 2000,
@@ -684,6 +681,7 @@ def seed_price_history(db: Session, gpu_map: dict[str, GPU]):
             ("2025-07-01", 27000, "market"),     # tightening 2025 supply
             ("2026-04-01", 30000, "market"),     # 2026 channel reality
             ("2026-08-01", 30000, "market"),     # holding steady per Aug 2026 pricing surveys
+            ("2026-10-20", 31000, "market"),     # Oct 2026 surveys: ~$31k new card
         ],
         "H200 SXM": [
             ("2024-01-01", 32000, "msrp"),
@@ -692,6 +690,7 @@ def seed_price_history(db: Session, gpu_map: dict[str, GPU]):
             ("2025-07-01", 29000, "market"),
             ("2026-04-01", 30000, "market"),
             ("2026-08-01", 35000, "market"),     # $30-40k street range (jarvislabs.ai, Aug 2026); midpoint used
+            ("2026-10-20", 38000, "market"),     # Oct 2026 surveys: $32-47k range, midpoint-ish
         ],
         "B200 HGX": [
             ("2024-10-01", 42000, "msrp"),
@@ -707,6 +706,7 @@ def seed_price_history(db: Session, gpu_map: dict[str, GPU]):
             ("2026-01-01", 50000, "msrp"),
             ("2026-04-01", 50000, "market"),
             ("2026-08-01", 51000, "market"),     # ~$53k spot quotes vs ~$40k DGX-implied — midpoint held near msrp
+            ("2026-10-20", 53000, "market"),     # Oct 2026 estimates cluster ~$53k (gpubattle)
         ],
         "GB200 NVL72": [
             # Per-GPU equivalent of full NVL72 rack pricing (rack ÷ 72)
@@ -718,6 +718,7 @@ def seed_price_history(db: Session, gpu_map: dict[str, GPU]):
             # $2-3M (getdeploying.com / together.ai / moduledge.com), ≈$27.8-
             # 41.7k/GPU — the $45k series above was overstated.
             ("2026-08-01", 38000, "market"),
+            ("2026-10-20", 43000, "market"),     # SemiAnalysis ~$3.1M bare rack / 72
         ],
         "GB300 NVL72": [
             # Per-GPU equivalent, corrected Aug 2026 — see msrp_usd comment above.
@@ -728,6 +729,7 @@ def seed_price_history(db: Session, gpu_map: dict[str, GPU]):
             # Jul 2026) ≈ $41.7-55.6k/GPU — the prior $75-80k series was
             # based on an unconfirmed $6-6.5M rack figure.
             ("2026-08-01", 48000, "market"),
+            ("2026-10-20", 55000, "market"),     # Loop Capital $3.7-4.0M rack / 72; Tom's Hardware $6-6.5M ≈ $83-90k is the high case
         ],
         "RTX PRO 6000 BSE": [
             ("2025-01-01", 9000, "msrp"),
