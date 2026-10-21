@@ -2,9 +2,7 @@
 
 from dataclasses import dataclass
 
-from sqlalchemy.orm import Session
-
-from app.models import GPU, Availability
+from app.models import GPU
 
 # Reference lead time for the score curve. Picked at 8 weeks because it
 # matches H200's typical 2026 availability and gives a clean 0.5 score.
@@ -31,7 +29,6 @@ class AvailabilityResult:
 
 
 def calc_availability(
-    db: Session,
     gpu: GPU,
     max_lead_time_weeks: int | None = None,
 ) -> AvailabilityResult:
@@ -40,7 +37,7 @@ def calc_availability(
     score = 1 / (1 + lead_time_weeks / BASELINE_WEEKS), then a status
     multiplier is applied. Score saturates at 1.0.
     """
-    avail = db.query(Availability).filter(Availability.gpu_id == gpu.id).first()
+    avail = gpu.availability  # eager-loaded by run_calculation
 
     if avail:
         lead_time = avail.lead_time_weeks

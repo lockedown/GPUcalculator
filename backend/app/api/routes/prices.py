@@ -12,21 +12,18 @@ router = APIRouter()
 def list_all_prices(db: Session = Depends(get_db)):
     """Get price history for all GPUs."""
     gpus = db.query(GPU).order_by(GPU.vendor, GPU.name).all()
-    result = []
-    for gpu in gpus:
-        prices = (
-            db.query(PriceHistory)
-            .filter(PriceHistory.gpu_id == gpu.id)
-            .order_by(PriceHistory.date)
-            .all()
+    by_gpu: dict[int, list[PriceHistory]] = {}
+    for p in db.query(PriceHistory).order_by(PriceHistory.date).all():
+        by_gpu.setdefault(p.gpu_id, []).append(p)
+    return [
+        PriceHistoryByGPU(
+            gpu_id=gpu.id,
+            gpu_name=gpu.name,
+            prices=[PriceHistoryRead.model_validate(p) for p in by_gpu[gpu.id]],
         )
-        if prices:
-            result.append(PriceHistoryByGPU(
-                gpu_id=gpu.id,
-                gpu_name=gpu.name,
-                prices=[PriceHistoryRead.model_validate(p) for p in prices],
-            ))
-    return result
+        for gpu in gpus
+        if gpu.id in by_gpu
+    ]
 
 
 @router.get("/prices/{gpu_id}", response_model=PriceHistoryByGPU)

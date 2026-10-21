@@ -44,7 +44,7 @@ python -m venv .venv
 # macOS/Linux
 # source .venv/bin/activate
 
-pip install -r requirements.txt
+pip install -r ../requirements-dev.txt
 python -m app.db.seed          # Parse HTML → seed SQLite
 uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
@@ -122,8 +122,6 @@ DATABASE_URL="postgresql://user:pass@ep-xxx.neon.tech/dbname?sslmode=require" py
 | `/api/networking` | GET | Networking options |
 | `/api/prices` | GET | Price history for all GPUs |
 | `/api/prices/{gpu_id}` | GET | Price history per GPU |
-| `/api/export/csv` | POST | CSV export of comparison results |
-| `/api/export/json` | POST | JSON export of comparison results |
 
 ---
 

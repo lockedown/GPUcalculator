@@ -1,4 +1,4 @@
-"""Tests for the price history and export API endpoints."""
+"""Tests for the price history API endpoints."""
 
 import pytest
 from fastapi.testclient import TestClient
@@ -65,74 +65,3 @@ class TestPricesEndpoint:
         assert len(prices) >= 3
         assert prices[1] < prices[0], "H200 price should dip shortly after launch"
         assert prices[-1] > prices[1], "H200 price should recover as 2025-2026 supply tightened"
-
-
-class TestExportEndpoint:
-    """Test POST /api/export/csv and /api/export/json."""
-
-    WORKLOAD = {
-        "model_params_b": 70,
-        "precision": "FP16",
-        "context_length": 4096,
-        "concurrent_users": 1,
-        "workload_type": "inference",
-        "batch_size": 1,
-    }
-
-    def test_export_csv_returns_200(self):
-        r = client.post("/api/export/csv", json=self.WORKLOAD)
-        assert r.status_code == 200
-        assert "text/csv" in r.headers.get("content-type", "")
-
-    def test_export_csv_has_header_row(self):
-        r = client.post("/api/export/csv", json=self.WORKLOAD)
-        lines = r.text.strip().split("\n")
-        assert len(lines) >= 2  # Header + at least 1 data row
-        header = lines[0]
-        assert "Rank" in header
-        assert "GPU" in header
-        assert "Score" in header
-        assert "TCO" in header
-
-    def test_export_csv_has_all_gpus(self):
-        r = client.post("/api/export/csv", json=self.WORKLOAD)
-        lines = r.text.strip().split("\n")
-        # Header + 14 GPUs (8 from HTML + H100 SXM5, RTX PRO 6000 BSE,
-        # Vera Rubin NVL72, Rubin CPX, MI450X, MI455X)
-        assert len(lines) == 15
-
-    def test_export_csv_includes_rack_data(self):
-        r = client.post("/api/export/csv", json=self.WORKLOAD)
-        header = r.text.strip().split("\n")[0]
-        assert "Racks" in header
-        assert "Power/Rack" in header
-        assert "PDU Tier" in header
-
-    def test_export_json_returns_200(self):
-        r = client.post("/api/export/json", json=self.WORKLOAD)
-        assert r.status_code == 200
-        data = r.json()
-        assert "generated_at" in data
-        assert "workload" in data
-        assert "results" in data
-        assert "sweet_spot_gpu" in data
-
-    def test_export_json_results_have_rack_plan(self):
-        r = client.post("/api/export/json", json=self.WORKLOAD)
-        results = r.json()["results"]
-        # GPUs filtered by constraints (e.g. DLC-only) may have rack_plan=None
-        evaluated = [res for res in results if res.get("tokens_per_sec") is not None]
-        assert len(evaluated) > 0
-        for result in evaluated:
-            assert "rack_plan" in result
-            rack = result["rack_plan"]
-            assert rack is not None
-            assert "total_racks" in rack
-            assert "power_per_rack_kw" in rack
-            assert "pdu_tier_label" in rack
-
-    def test_export_json_ranked(self):
-        r = client.post("/api/export/json", json=self.WORKLOAD)
-        results = r.json()["results"]
-        scores = [r["composite_score"] for r in results if r["composite_score"]]
-        assert scores == sorted(scores, reverse=True)

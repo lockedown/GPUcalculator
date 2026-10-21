@@ -15,8 +15,7 @@ from app.engine.optimizer import (
     _rank_normalize,
     _constraint_penalty,
     _passes_all_constraints,
-    _benchmark_perf_score,
-    _benchmark_scores_dict,
+    _benchmark_scores,
     normalize_and_rank,
     evaluate_gpu,
     run_calculation,
@@ -104,12 +103,11 @@ class TestRankNormalize:
 # CONSTRAINT PENALTIES
 # ===========================================================================
 class TestConstraintPenalty:
-    def _make_result(self, tco=100_000, codes=None, power_kw=5.0):
+    def _make_result(self, tco=100_000, codes=None):
         r = GPUResult(
             gpu_id=1, gpu_name="Test", gpu_vendor="NVIDIA",
             tco_usd=tco, violation_codes=codes or [],
         )
-        r._power_kw = power_kw  # type: ignore[attr-defined]
         return r
 
     def test_no_violations_no_penalty(self):
@@ -129,12 +127,12 @@ class TestConstraintPenalty:
         assert _constraint_penalty(r_big, c) > _constraint_penalty(r_small, c)
 
     def test_power_violation_penalty(self):
-        r = self._make_result(power_kw=50.0, codes=["POWER_EXCEEDED"])
+        r = self._make_result(codes=["POWER_EXCEEDED"])
         c = ConstraintInput(max_power_per_rack_kw=40.0)
         assert _constraint_penalty(r, c) > 0
 
     def test_power_within_limit_no_penalty(self):
-        r = self._make_result(power_kw=30.0)
+        r = self._make_result()
         c = ConstraintInput(max_power_per_rack_kw=40.0)
         assert _constraint_penalty(r, c) == 0.0
 
@@ -158,7 +156,6 @@ class TestConstraintPenalty:
         r = self._make_result(
             tco=200_000,
             codes=["BUDGET_EXCEEDED", "POWER_EXCEEDED", "COOLING_SOFT"],
-            power_kw=100.0,
         )
         c = ConstraintInput(max_budget_usd=100_000, max_power_per_rack_kw=40.0)
         penalty = _constraint_penalty(r, c)
@@ -169,7 +166,6 @@ class TestConstraintPenalty:
         r = self._make_result(
             tco=10_000_000,
             codes=["BUDGET_EXCEEDED", "LEAD_TIME_EXCEEDED", "COOLING_HARD", "POWER_EXCEEDED"],
-            power_kw=200.0,
         )
         r.availability_score = 0.1
         c = ConstraintInput(max_budget_usd=100, max_power_per_rack_kw=10, max_lead_time_weeks=4)
@@ -186,7 +182,7 @@ class TestConstraintPenalty:
         assert _passes_all_constraints(r, c) is False
 
     def test_fails_power_constraint(self):
-        r = self._make_result(power_kw=100.0, codes=["POWER_EXCEEDED"])
+        r = self._make_result(codes=["POWER_EXCEEDED"])
         c = ConstraintInput(max_power_per_rack_kw=40.0)
         assert _passes_all_constraints(r, c) is False
 
@@ -196,7 +192,7 @@ class TestConstraintPenalty:
         assert _passes_all_constraints(r, c) is False
 
     def test_passes_within_all_limits(self):
-        r = self._make_result(tco=50_000, power_kw=5.0)
+        r = self._make_result(tco=50_000)
         r.availability_score = 0.8
         c = ConstraintInput(max_budget_usd=100_000, max_power_per_rack_kw=40.0, max_lead_time_weeks=12)
         assert _passes_all_constraints(r, c) is True
@@ -315,22 +311,20 @@ class TestBenchmarkBlending:
         order_quant = [r.gpu_name for r in r_quant]
         assert order_none != order_quant, "Benchmark blending should change rankings"
 
-    def test_benchmark_perf_score_returns_float(self, db):
+    def test_benchmark_scores_in_range(self, db):
         gpu = db.query(GPU).filter(GPU.name == "H200 SXM").first()
-        score = _benchmark_perf_score(db, gpu.id, "tokenization")
-        assert isinstance(score, float)
-        assert 0 < score <= 100
+        scores = _benchmark_scores(gpu, "tokenization")
+        assert scores and all(0 < v <= 100 for v in scores.values())
 
     def test_benchmark_scores_dict_has_entries(self, db):
         gpu = db.query(GPU).filter(GPU.name == "B200 HGX").first()
-        scores = _benchmark_scores_dict(db, gpu.id, "quant")
+        scores = _benchmark_scores(gpu, "quant")
         assert len(scores) >= 3  # STAC-A2, Monte Carlo, DGEMM
         assert all(0 < v <= 100 for v in scores.values())
 
     def test_invalid_category_returns_no_benchmarks(self, db):
         gpu = db.query(GPU).filter(GPU.name == "H200 SXM").first()
-        score = _benchmark_perf_score(db, gpu.id, "nonexistent_category")
-        assert score is None
+        assert _benchmark_scores(gpu, "nonexistent_category") == {}
 
 
 # ===========================================================================
@@ -352,7 +346,6 @@ class TestNormalizeAndRank:
                 warnings=[],
             )
             r._bench_perf_pct = None  # type: ignore[attr-defined]
-            r._power_kw = 5.0  # type: ignore[attr-defined]
             results.append(r)
         return results
 
@@ -714,21 +707,21 @@ class TestAvailabilityEngine:
     def test_ga_gpu_higher_score_than_estimated(self, db):
         h200 = db.query(GPU).filter(GPU.name == "H200 SXM").first()
         b300 = db.query(GPU).filter(GPU.name == "B300 HGX").first()
-        av_h = calc_availability(db, h200)
-        av_b = calc_availability(db, b300)
+        av_h = calc_availability(h200)
+        av_b = calc_availability(b300)
         assert av_h.score >= av_b.score
 
     def test_meets_constraint_when_within_limit(self, db):
         h200 = db.query(GPU).filter(GPU.name == "H200 SXM").first()
-        av = calc_availability(db, h200, max_lead_time_weeks=52)
+        av = calc_availability(h200, max_lead_time_weeks=52)
         assert av.meets_constraint is True
 
     def test_fails_constraint_when_over_limit(self, db):
         h200 = db.query(GPU).filter(GPU.name == "H200 SXM").first()
-        av = calc_availability(db, h200, max_lead_time_weeks=0)
+        av = calc_availability(h200, max_lead_time_weeks=0)
         assert av.meets_constraint is False
 
     def test_score_between_0_and_1(self, db):
         for gpu in db.query(GPU).all():
-            av = calc_availability(db, gpu)
+            av = calc_availability(gpu)
             assert 0 <= av.score <= 1.0

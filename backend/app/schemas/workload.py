@@ -1,23 +1,27 @@
-from pydantic import BaseModel, Field
+from typing import Literal
+
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class WorkloadInput(BaseModel):
     model_config = {"protected_namespaces": ()}
 
-    model_params_b: float = Field(..., description="Model parameters in billions")
-    precision: str = Field("FP16", description="FP4, FP8, FP16, BF16, FP32")
-    context_length: int = Field(4096, description="Context length in tokens")
-    concurrent_users: int = Field(1, description="Number of concurrent users/requests")
-    workload_type: str = Field("inference", description="inference, training, pre-training, fine-tuning, quant, risk, hpc, trading")
-    batch_size: int = Field(1, description="Batch size")
+    model_params_b: float = Field(..., gt=0, le=10_000, description="Model parameters in billions")
+    precision: Literal["FP4", "FP8", "FP16", "BF16", "FP32"] = Field("FP16", description="FP4, FP8, FP16, BF16, FP32")
+    context_length: int = Field(4096, gt=0, le=10_000_000, description="Context length in tokens")
+    concurrent_users: int = Field(1, ge=1, le=100_000, description="Number of concurrent users/requests")
+    workload_type: Literal[
+        "inference", "training", "pre-training", "fine-tuning", "quant", "risk", "hpc", "trading"
+    ] = Field("inference", description="inference, training, pre-training, fine-tuning, quant, risk, hpc, trading")
+    batch_size: int = Field(1, ge=1, le=4096, description="Batch size")
     is_moe: bool = Field(False, description="Whether the model uses Mixture-of-Experts")
-    num_experts: int = Field(8, description="Total number of experts (MoE only)")
-    active_experts: int = Field(2, description="Number of active experts per token (MoE only)")
+    num_experts: int = Field(8, ge=1, le=4096, description="Total number of experts (MoE only)")
+    active_experts: int = Field(2, ge=1, le=4096, description="Number of active experts per token (MoE only)")
     finance_benchmark_category: str | None = Field(
         None, description="Optional: quant, risk, inference, hpc, trading, tokenization"
     )
     # ---- Multi-tenancy / fractional GPU (Run:ai-style) ----
-    multi_tenancy_mode: str = Field(
+    multi_tenancy_mode: Literal["dedicated", "mig", "runai_fractional"] = Field(
         "dedicated",
         description=(
             "GPU partitioning mode. 'dedicated' = one workload owns the GPU. "
@@ -35,6 +39,8 @@ class WorkloadInput(BaseModel):
     )
     tenants: int = Field(
         1,
+        ge=1,
+        le=1000,
         description=(
             "Number of co-located tenants. Informational under 'dedicated'; "
             "for 'runai_fractional' divides per-GPU throughput by this number "
@@ -43,7 +49,7 @@ class WorkloadInput(BaseModel):
         ),
     )
     # ---- Disaggregated prefill/decode (Dynamo-style) ----
-    serving_mode: str = Field(
+    serving_mode: Literal["colocated", "disaggregated"] = Field(
         "colocated",
         description=(
             "'colocated' = one GPU pool runs both prefill and decode (current "
@@ -55,32 +61,45 @@ class WorkloadInput(BaseModel):
         ),
     )
 
+    @model_validator(mode="after")
+    def _active_experts_within_total(self):
+        if self.is_moe and self.active_experts > self.num_experts:
+            raise ValueError("active_experts cannot exceed num_experts")
+        return self
+
 
 class ConstraintInput(BaseModel):
-    max_budget_usd: float | None = Field(None, description="Maximum amortised TCO budget in USD")
-    max_power_per_rack_kw: float | None = Field(None, description="Max power per rack in kW")
-    cooling_type: str = Field("air", description="air or liquid")
-    max_lead_time_weeks: int | None = Field(None, description="Max acceptable lead time in weeks")
+    max_budget_usd: float | None = Field(None, ge=0, description="Maximum amortised TCO budget in USD")
+    max_power_per_rack_kw: float | None = Field(None, ge=0, description="Max power per rack in kW")
+    cooling_type: Literal["air", "liquid"] = Field("air", description="air or liquid")
+    max_lead_time_weeks: int | None = Field(None, ge=0, description="Max acceptable lead time in weeks")
     amortization_months: int = Field(
         48,
+        ge=1,
+        le=120,
         description="GPU CapEx amortisation period in months (36, 48, or 60). Default 48 = 4yr (industry middle ground; AWS uses 60, hyperscalers up to 72).",
     )
     # Run-cost OpEx components (USD). Default to typical US enterprise values;
     # set any to 0.0 to opt out of that line.
     colo_usd_per_kw_per_month: float = Field(
         200.0,
+        ge=0,
         description="Colocation rent per IT-kW per month, USD. CBRE H2 2025: ~$195. Set 0 if self-operated.",
     )
     hw_support_pct_of_capex_per_year: float = Field(
         0.10,
+        ge=0,
+        le=1,
         description="Hardware support contract as fraction of CapEx per year. Typical 8-15% for AI hardware.",
     )
     software_usd_per_gpu_per_year: float = Field(
         1000.0,
+        ge=0,
         description="Software licensing per GPU per year, USD (e.g. NVIDIA AI Enterprise list ~$1000/GPU/yr).",
     )
     grid_carbon_intensity_g_kwh: float = Field(
         380.0,
+        ge=0,
         description=(
             "Grid carbon intensity (g CO₂e per kWh). Used to compute "
             "carbon_kg_per_year. Default 380 g/kWh = US-East (PJM, EPA "
@@ -94,12 +113,22 @@ class ConstraintInput(BaseModel):
     )
     target_tpot_ms: int | None = Field(
         None,
+        gt=0,
         description=(
             "Optional target time-per-output-token in ms. Candidates whose "
             "per-user TPOT exceeds this raise the TPOT_MISSED advisory; "
             "purely informational, does not block ranking."
         ),
     )
+
+
+    @field_validator("metric_weights")
+    @classmethod
+    def _weights_known_and_non_negative(cls, v):
+        unknown = set(v) - {"performance", "cost", "complexity", "availability"}
+        if unknown or any(w < 0 for w in v.values()):
+            raise ValueError("metric_weights: known keys only, values >= 0")
+        return v
 
 
 class TopologyResult(BaseModel):

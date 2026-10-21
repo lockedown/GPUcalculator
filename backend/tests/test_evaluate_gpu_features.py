@@ -34,6 +34,15 @@ class TestLatencyMetrics:
         r = evaluate_gpu(db, gpu, w, ConstraintInput())
         assert r.tpot_ms == pytest.approx(1000.0 / r.per_user_decode_tps, rel=1e-3)
 
+    def test_aggregate_decode_is_per_user_rate_times_users(self, db):
+        # Roofline rates are per sequence: total = per-user × concurrent users.
+        gpu = db.query(GPU).filter(GPU.name == "B200 HGX").first()
+        w = WorkloadInput(model_params_b=70, precision="FP8", concurrent_users=32)
+        r = evaluate_gpu(db, gpu, w, ConstraintInput())
+        assert r.decode_tokens_per_sec == pytest.approx(r.per_user_decode_tps * 32, rel=1e-3)
+        # 32 users on B200 FP8 70B still decode at well over interactive speed.
+        assert r.tpot_ms < 50
+
     def test_per_user_decode_drops_with_concurrency(self, db):
         gpu = db.query(GPU).filter(GPU.name == "B200 HGX").first()
         c = ConstraintInput()
@@ -353,3 +362,26 @@ class TestDisaggregation:
     def test_disagg_advisory_does_not_gate_ranking(self):
         from app.engine.optimizer import HARD_VIOLATION_CODES
         assert "DISAGG_RECOMMENDED" not in HARD_VIOLATION_CODES
+
+
+# ===========================================================================
+# Rack power limit is judged per rack, not on the whole cluster
+# ===========================================================================
+class TestRackPowerLimit:
+    def _b200(self, db, users, limit_kw):
+        gpu = db.query(GPU).filter(GPU.name == "B200 HGX").first()
+        w = WorkloadInput(model_params_b=70, precision="FP8", concurrent_users=users)
+        return evaluate_gpu(db, gpu, w, ConstraintInput(max_power_per_rack_kw=limit_kw))
+
+    def test_big_cluster_split_over_racks_is_fine(self, db):
+        # 72 GPUs (~72 kW total) over 3 racks of ~39 kW each fits a 40 kW rack limit.
+        r = self._b200(db, users=256, limit_kw=40)
+        assert r.rack_plan.total_racks > 1 and r.rack_plan.fits_power_constraint
+        assert "POWER_EXCEEDED" not in r.violation_codes
+
+    def test_single_rack_over_limit_is_flagged(self, db):
+        # One 8-GPU B200 server rack draws ~12 kW; a 10 kW limit must trip even
+        # though the GPUs alone (3 kW total) are under it.
+        r = self._b200(db, users=32, limit_kw=10)
+        assert not r.rack_plan.fits_power_constraint
+        assert "POWER_EXCEEDED" in r.violation_codes

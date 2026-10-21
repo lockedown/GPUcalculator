@@ -15,9 +15,9 @@ v2 improvements:
 import math
 from statistics import mean
 
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload, selectinload
 
-from app.models import GPU, Benchmark
+from app.models import GPU
 from app.schemas.workload import (
     WorkloadInput,
     ConstraintInput,
@@ -323,38 +323,17 @@ def calc_topology(
 # ---------------------------------------------------------------------------
 # Benchmark-backed performance score
 # ---------------------------------------------------------------------------
-def _benchmark_perf_score(
-    db: Session, gpu_id: int, category: str
-) -> float | None:
-    """Return average bar_pct (0-100) for a GPU in a benchmark category.
+def _benchmark_scores(gpu: GPU, category: str) -> dict[str, float]:
+    """Return {benchmark_name: bar_pct} for a GPU in a category.
 
-    Returns None if no benchmarks found for this GPU/category.
+    Reads ``gpu.benchmarks`` (eager-loaded by ``run_calculation``) so scoring
+    a catalogue costs one query, not two per GPU.
     """
-    benches = (
-        db.query(Benchmark)
-        .filter(
-            Benchmark.gpu_id == gpu_id,
-            Benchmark.workload_category == category,
-        )
-        .all()
-    )
-    pcts = [b.bar_pct for b in benches if b.bar_pct is not None]
-    return mean(pcts) if pcts else None
-
-
-def _benchmark_scores_dict(
-    db: Session, gpu_id: int, category: str
-) -> dict[str, float]:
-    """Return {benchmark_name: bar_pct} dict for a GPU in a category."""
-    benches = (
-        db.query(Benchmark)
-        .filter(
-            Benchmark.gpu_id == gpu_id,
-            Benchmark.workload_category == category,
-        )
-        .all()
-    )
-    return {b.benchmark_name: b.bar_pct for b in benches if b.bar_pct is not None}
+    return {
+        b.benchmark_name: b.bar_pct
+        for b in gpu.benchmarks
+        if b.workload_category == category and b.bar_pct is not None
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -431,20 +410,16 @@ def _apply_hard_filters(
 
 def _compute_latency(
     workload: WorkloadInput,
-    effective_decode: float,
-    effective_prefill: float,
-    total_sequences: int,
+    per_user_decode_tps: float,
+    per_user_prefill_tps: float,
 ) -> tuple[float | None, float | None, float]:
     """Return ``(ttft_ms, tpot_ms, per_user_decode_tps)`` for the workload.
 
-    Aggregate throughput is shared across ``total_sequences`` concurrent users,
-    so per-user rate = aggregate ÷ total_sequences. TTFT is wall-clock time to
+    Inputs are already per-sequence rates (the roofline model divides the
+    shared bandwidth/compute across the batch). TTFT is wall-clock time to
     chew through one user's prompt; TPOT is the gap between successive output
     tokens for one user. Caller decides whether to emit ``TPOT_MISSED``.
     """
-    user_count = max(1, total_sequences)
-    per_user_decode_tps = effective_decode / user_count if effective_decode > 0 else 0.0
-    per_user_prefill_tps = effective_prefill / user_count if effective_prefill > 0 else 0.0
     tpot_ms = 1000.0 / per_user_decode_tps if per_user_decode_tps > 0 else None
     ttft_ms = (
         workload.context_length * 1000.0 / per_user_prefill_tps
@@ -480,9 +455,13 @@ def _collect_constraint_advisories(
     constraints: ConstraintInput,
     cost,
     avail,
+    rack,
 ) -> tuple[list[str], list[str]]:
     """Return ``(warnings, codes)`` for the post-cost / availability checks
     (cooling, lead-time, budget, power, PRE_GA).
+
+    The power limit is per rack, so it is judged on the rack plan; the
+    matching warning text is the rack planner's ``density_warning``.
     """
     warnings: list[str] = []
     codes: list[str] = []
@@ -505,10 +484,7 @@ def _collect_constraint_advisories(
             f"TCO ${cost.tco_36m_usd:,.0f} exceeds budget ${constraints.max_budget_usd:,.0f}"
         )
         codes.append(Violation.BUDGET)
-    if constraints.max_power_per_rack_kw and cost.power_kw > constraints.max_power_per_rack_kw:
-        warnings.append(
-            f"Power {cost.power_kw:.1f}kW exceeds rack limit {constraints.max_power_per_rack_kw}kW"
-        )
+    if not rack.fits_power_constraint:
         codes.append(Violation.POWER)
 
     return warnings, codes
@@ -656,9 +632,10 @@ def evaluate_gpu(
         workload.precision,
     )
 
-    # Aggregate throughput = sum across all DP replicas
-    effective_decode = per_replica_decode * topo.dp_degree
-    effective_prefill = per_replica_prefill * topo.dp_degree
+    # The roofline rates are per concurrent sequence (batch-aware), so each
+    # user runs at this rate whichever replica serves them.
+    per_user_decode = per_replica_decode
+    per_user_prefill = per_replica_prefill
 
     # MoE all-to-all routing overhead — applied to decode only (per-token cost).
     # This is on top of calibration (which is dense-Llama-3-70B based and does
@@ -670,14 +647,18 @@ def evaluate_gpu(
         topo.gpu_count,
     )
     if moe_overhead > 0:
-        effective_decode *= 1.0 - moe_overhead
+        per_user_decode *= 1.0 - moe_overhead
 
-    # Run:ai time-slicing — each tenant gets aggregate ÷ tenants. MIG is
+    # Run:ai time-slicing — each tenant gets throughput ÷ tenants. MIG is
     # already accounted for via the spec downscaling above (compute and
     # bandwidth fractions), so its divisor stays 1.0.
     if tenancy.throughput_divisor > 1.0:
-        effective_decode /= tenancy.throughput_divisor
-        effective_prefill /= tenancy.throughput_divisor
+        per_user_decode /= tenancy.throughput_divisor
+        per_user_prefill /= tenancy.throughput_divisor
+
+    # Aggregate throughput = every concurrent sequence at its per-user rate.
+    effective_decode = per_user_decode * total_sequences
+    effective_prefill = per_user_prefill * total_sequences
 
     # Per-tenant view = aggregate after tenancy adjustments. For MIG it equals
     # effective_decode (one tenant per slice). For Run:ai it's the slice each
@@ -700,7 +681,7 @@ def evaluate_gpu(
 
     # --- Per-user latency (TTFT, TPOT) ---
     ttft_ms, tpot_ms, per_user_decode_tps = _compute_latency(
-        workload, effective_decode, effective_prefill, total_sequences
+        workload, per_user_decode, per_user_prefill
     )
     if (
         constraints.target_tpot_ms is not None
@@ -739,25 +720,13 @@ def evaluate_gpu(
     )
 
     # --- Availability ---
-    avail = calc_availability(db, gpu, constraints.max_lead_time_weeks)
+    avail = calc_availability(gpu, constraints.max_lead_time_weeks)
 
     # --- Benchmark scores (for display AND scoring) ---
     bench_scores: dict[str, float] = {}
-    bench_perf_pct: float | None = None
     if workload.finance_benchmark_category:
-        bench_scores = _benchmark_scores_dict(
-            db, gpu.id, workload.finance_benchmark_category
-        )
-        bench_perf_pct = _benchmark_perf_score(
-            db, gpu.id, workload.finance_benchmark_category
-        )
-
-    # --- Warnings + structured violation codes ---
-    advisory_warnings, advisory_codes = _collect_constraint_advisories(
-        gpu, constraints, cost, avail
-    )
-    warnings.extend(advisory_warnings)
-    codes.extend(advisory_codes)
+        bench_scores = _benchmark_scores(gpu, workload.finance_benchmark_category)
+    bench_perf_pct = mean(bench_scores.values()) if bench_scores else None
 
     # --- Rack planning ---
     rack = plan_rack_layout(
@@ -793,6 +762,13 @@ def evaluate_gpu(
     )
     if rack.density_warning:
         warnings.append(rack.density_warning)
+
+    # --- Warnings + structured violation codes ---
+    advisory_warnings, advisory_codes = _collect_constraint_advisories(
+        gpu, constraints, cost, avail, rack
+    )
+    warnings.extend(advisory_warnings)
+    codes.extend(advisory_codes)
     # Note: rack-density warnings stay narrative-only — they're a hint to the
     # user, not a constraint. Add a code here later if they become filterable.
 
@@ -861,7 +837,6 @@ def evaluate_gpu(
 
     # Stash benchmark perf % for composite scoring (not serialised to client)
     result._bench_perf_pct = bench_perf_pct  # type: ignore[attr-defined]
-    result._power_kw = cost.power_kw  # type: ignore[attr-defined]
     return result
 
 
@@ -1039,7 +1014,11 @@ def run_calculation(
     constraints: ConstraintInput,
 ) -> list[GPUResult]:
     """Run sizing calculation for all GPUs."""
-    gpus = db.query(GPU).all()
+    gpus = (
+        db.query(GPU)
+        .options(joinedload(GPU.availability), selectinload(GPU.benchmarks))
+        .all()
+    )
     results = [evaluate_gpu(db, gpu, workload, constraints) for gpu in gpus]
     return normalize_and_rank(results, constraints.metric_weights, constraints)
 

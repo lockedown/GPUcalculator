@@ -13,7 +13,7 @@ Monorepo: `backend/` (FastAPI) + `frontend/` (Next.js 16), deployed separately o
 ### Backend (from `backend/`)
 ```bash
 python -m venv .venv && source .venv/bin/activate   # or .venv\Scripts\activate on Windows
-pip install -r ../requirements.txt   # root requirements.txt, not backend/
+pip install -r ../requirements-dev.txt   # root dev file (adds test/seed deps); deploy uses ../requirements.txt
 python -m app.db.seed                # parse HTML -> seed SQLite (gpu_optimizer.db)
 uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
@@ -22,7 +22,7 @@ API docs at `http://127.0.0.1:8000/api/docs`.
 Tests:
 ```bash
 cd backend
-python -m pytest tests/ -q                          # full suite (180 tests)
+python -m pytest tests/ -q                          # full suite
 python -m pytest tests/test_optimizer_v2.py -q       # single file
 python -m pytest tests/test_cost.py::test_name -q    # single test
 ```
@@ -41,6 +41,7 @@ npm install
 npm run dev      # http://localhost:3000
 npm run build
 npm run lint
+npm test         # vitest (share-link round trip)
 ```
 Frontend talks to the API via `NEXT_PUBLIC_API_URL` (defaults to `http://127.0.0.1:8000/api` for local dev).
 

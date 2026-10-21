@@ -113,7 +113,7 @@ export default async function MethodologyPage() {
             <code className="bg-gray-100 px-1 rounded text-[11px]">
               {" "}2 × num_layers × (num_KV_heads × head_dim) × context × bytes_per_elem
             </code>.
-            For Llama-3-70B in FP16 at 16 K context that's ~5 GiB per user; at 4 K it's ~1.25 GiB.
+            For Llama-3-70B in FP16 at 16 K context that&apos;s ~5 GiB per user; at 4 K it&apos;s ~1.25 GiB.
           </p>
         </Section>
 
@@ -157,7 +157,7 @@ export default async function MethodologyPage() {
             <li>+ optional storage cost</li>
           </ul>
           <h3 className="text-sm font-semibold text-gray-900 mt-3">OpEx (monthly)</h3>
-          <p>OpEx is the sum of four components, each editable in the dashboard's <em>Run Costs</em> panel and itemised in the Sweet Spot Detail breakdown:</p>
+          <p>OpEx is the sum of four components, each editable in the dashboard&apos;s <em>Run Costs</em> panel and itemised in the Sweet Spot Detail breakdown:</p>
           <ul className="list-disc pl-5 space-y-1.5">
             <li>
               <strong>Power</strong> — <code className="bg-gray-100 px-1 rounded text-[11px]">total_TDP_kW × PUE × 730 h × $0.10/kWh</code>.
@@ -172,7 +172,7 @@ export default async function MethodologyPage() {
               suppression. CBRE H2-2025 reports ~$195/kW-month for 250–500 kW
               deployments in major US DC markets. Charged on IT-kW reserved
               (separate from the metered electricity above). Set to 0 if
-              you're self-operated and the rent is already capitalised.
+              you&apos;re self-operated and the rent is already capitalised.
             </li>
             <li>
               <strong>Hardware support</strong> — <code className="bg-gray-100 px-1 rounded text-[11px]">CapEx × 10% / 12</code>.
@@ -210,7 +210,7 @@ export default async function MethodologyPage() {
         <Section id="complexity" title="Complexity score">
           <p>
             A 0–10 score (higher = easier) capturing how mature and battle-tested
-            the GPU's software / deployment stack is.
+            the GPU&apos;s software / deployment stack is.
           </p>
           <p>
             Base = best vendor stack maturity from the database. Today:
@@ -226,8 +226,8 @@ export default async function MethodologyPage() {
             <li>Rack-scale deployment (NVL72): <strong>−2</strong> (specialised power/cooling/handling)</li>
           </ul>
           <p>
-            Cooling mismatches are <em>not</em> penalised here — they're
-            handled by the optimizer's structured constraint codes so they
+            Cooling mismatches are <em>not</em> penalised here — they&apos;re
+            handled by the optimizer&apos;s structured constraint codes so they
             only count once.
           </p>
         </Section>
@@ -256,7 +256,7 @@ export default async function MethodologyPage() {
           <ul className="list-disc pl-5 space-y-1">
             <li><strong>available</strong> — × 1.2 (capped at 100%)</li>
             <li><strong>constrained</strong> — × 1.0 (baseline)</li>
-            <li><strong>announced</strong> — × 0.5 (heavy penalty — you can't actually buy it yet)</li>
+            <li><strong>announced</strong> — × 0.5 (heavy penalty — you can&apos;t actually buy it yet)</li>
           </ul>
         </Section>
 
@@ -275,7 +275,7 @@ export default async function MethodologyPage() {
           <ul className="list-disc pl-5 space-y-1">
             <li><strong>Cooling</strong> — air-cooled site filters out DLC-mandatory GPUs (B300, GB200 NVL72, GB300 NVL72) entirely.</li>
             <li><strong>Workload</strong> — RTX PRO 6000 BSE is inference-only; training/fine-tuning workloads exclude it.</li>
-            <li><strong>Model size</strong> — 200B+ models exclude the 96 GB RTX PRO 6000 BSE because the model literally won't fit.</li>
+            <li><strong>Model size</strong> — 200B+ models exclude the 96 GB RTX PRO 6000 BSE because the model literally won&apos;t fit.</li>
           </ul>
           <p>
             Each violation produces a stable code (<code className="bg-gray-100 px-1 rounded text-[11px]">BUDGET_EXCEEDED</code>, <code className="bg-gray-100 px-1 rounded text-[11px]">DLC_REQUIRED</code>, <code className="bg-gray-100 px-1 rounded text-[11px]">MODEL_TOO_LARGE</code>, etc.) that the API returns alongside the human-readable warning.
@@ -304,8 +304,8 @@ export default async function MethodologyPage() {
           </p>
           <p>
             The default weights (35/30/15/20) target a generic enterprise
-            buyer. Slide cost to 100% and you'll get the cheapest option that
-            fits; slide performance to 100% and you'll get the fastest one
+            buyer. Slide cost to 100% and you&apos;ll get the cheapest option that
+            fits; slide performance to 100% and you&apos;ll get the fastest one
             regardless of price.
           </p>
         </Section>

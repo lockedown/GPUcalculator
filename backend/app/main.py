@@ -1,11 +1,13 @@
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from app.config import settings
 from app.db.database import create_tables
-from app.api.routes import hardware, benchmarks, calculate, compare, networking, prices, export
+from app.api.routes import hardware, benchmarks, calculate, compare, networking, prices
 
 
 @asynccontextmanager
@@ -35,20 +37,22 @@ app.include_router(calculate.router, prefix=settings.API_V1_PREFIX, tags=["calcu
 app.include_router(compare.router, prefix=settings.API_V1_PREFIX, tags=["compare"])
 app.include_router(networking.router, prefix=settings.API_V1_PREFIX, tags=["networking"])
 app.include_router(prices.router, prefix=settings.API_V1_PREFIX, tags=["prices"])
-app.include_router(export.router, prefix=settings.API_V1_PREFIX, tags=["export"])
 
 
 @app.get("/health")
 async def health():
     from sqlalchemy import text
     from app.db.database import SessionLocal
+    db = SessionLocal()
     try:
-        db = SessionLocal()
         db.execute(text("SELECT 1"))
-        db.close()
         return {"status": "ok", "db": "connected"}
-    except Exception as e:
-        return {"status": "degraded", "db": str(e)}
+    except Exception:
+        # Real error stays in the logs: driver messages can carry host/user.
+        logging.getLogger(__name__).exception("health check: database unreachable")
+        return JSONResponse({"status": "degraded", "db": "unreachable"}, status_code=503)
+    finally:
+        db.close()
 
 
 @app.get(f"{settings.API_V1_PREFIX}/meta")

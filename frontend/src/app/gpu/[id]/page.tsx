@@ -54,6 +54,7 @@ export default function GPUDeepDivePage() {
   const { comparison, runComparison } = useStore();
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch on id change; loading flag must flip before the request
     setLoading(true);
     api.hardware
       .get(gpuId)

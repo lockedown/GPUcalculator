@@ -50,6 +50,7 @@ export default function ScenariosPage() {
       // Strip the param so a refresh doesn't re-import.
       window.history.replaceState(null, "", window.location.pathname);
     }
+    // eslint-disable-next-line react-hooks/immutability -- hoisted function declaration, safe to call here
     refresh();
   }, []);
 

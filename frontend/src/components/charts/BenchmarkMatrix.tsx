@@ -38,6 +38,7 @@ export default function BenchmarkMatrix({ initialBenchmarks, initialGpus }: Benc
     // If category filter is set, fetch filtered data client-side
     // If we have initial data and no filter, skip fetch
     if (!category && initialBenchmarks && initialGpus) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch on filter change; loading flag must flip before the request
     setLoading(true);
     Promise.all([
       api.benchmarks.list(category ? { category } : undefined),

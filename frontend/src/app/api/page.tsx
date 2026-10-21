@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge";
 export const metadata: Metadata = {
   title: "API — GPU Deployment Optimizer",
   description:
-    "Public REST API for the GPU sizing engine. curl-friendly endpoints for hardware catalogue, sizing comparisons, prices, and CSV export.",
+    "Public REST API for the GPU sizing engine. curl-friendly endpoints for hardware catalogue, sizing comparisons, and prices.",
 };
 
 const API_BASE = "https://gpu-calc-api.vercel.app/api";
@@ -19,7 +19,6 @@ const SECTIONS = [
   { id: "benchmarks", label: "Benchmarks" },
   { id: "prices", label: "Prices" },
   { id: "networking", label: "Networking" },
-  { id: "export", label: "Export" },
   { id: "fields", label: "Key response fields" },
   { id: "meta", label: "Engine meta" },
   { id: "openapi", label: "OpenAPI spec" },
@@ -225,27 +224,6 @@ export default function ApiDocsPage() {
             path="/api/networking"
             desc="Catalogue of intra-node + inter-node fabric options (NVLink, IB NDR/XDR, Infinity Fabric, RoCEv2)."
             curl={`curl ${API_BASE}/networking`}
-          />
-        </Section>
-
-        {/* Export */}
-        <Section id="export" title="Export">
-          <Endpoint
-            method="POST"
-            path="/api/export/csv"
-            desc="Run a comparison and stream the result as CSV (one row per GPU)."
-            curl={`curl -X POST ${API_BASE}/export/csv \\
-  -H 'Content-Type: application/json' \\
-  -d '{"model_params_b": 70, "precision": "FP8"}' \\
-  -o gpu_comparison.csv`}
-          />
-          <Endpoint
-            method="POST"
-            path="/api/export/json"
-            desc="Same as /compare but with a generated_at timestamp + workload echo, suited for archival."
-            curl={`curl -X POST ${API_BASE}/export/json \\
-  -H 'Content-Type: application/json' \\
-  -d '{"model_params_b": 70}'`}
           />
         </Section>
 

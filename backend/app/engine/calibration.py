@@ -112,21 +112,6 @@ RACK_SCALE_REFERENCE_GPUS: set[str] = {
 }
 
 
-def _build_calibration_factors(
-    roofline_fn,
-    reference: dict[str, float],
-) -> dict[str, float]:
-    """Compute multiplier so that roofline_value * factor ≈ reference."""
-    factors: dict[str, float] = {}
-    for gpu_name, ref in reference.items():
-        raw = roofline_fn(gpu_name)
-        if raw and raw > 0:
-            factors[gpu_name] = ref / raw
-        else:
-            factors[gpu_name] = 1.0
-    return factors
-
-
 # Lazy-init cache — built once on first access
 _decode_factors: dict[str, float] | None = None
 _prefill_factors: dict[str, float] | None = None
@@ -183,7 +168,7 @@ def get_decode_factor(gpu_name: str) -> float:
     if _decode_factors is None:
         from app.engine.performance import calc_decode_tokens_per_sec
         specs = _gpu_specs()
-        _decode_factors = {}
+        factors: dict[str, float] = {}  # published only when complete: request threads race here
         kv_dim = _LLAMA3_70B_ARCH["num_kv_heads"] * _LLAMA3_70B_ARCH["head_dim"]
         for name, ref in REFERENCE_DECODE.items():
             s = specs.get(name)
@@ -196,9 +181,10 @@ def get_decode_factor(gpu_name: str) -> float:
                     num_layers=_LLAMA3_70B_ARCH["num_layers"],
                     kv_dim=kv_dim,
                 )
-                _decode_factors[name] = ref / raw if raw > 0 else 1.0
+                factors[name] = ref / raw if raw > 0 else 1.0
             else:
-                _decode_factors[name] = 1.0
+                factors[name] = 1.0
+        _decode_factors = factors
     return _decode_factors.get(gpu_name, 1.0)
 
 
@@ -208,7 +194,7 @@ def get_prefill_factor(gpu_name: str) -> float:
     if _prefill_factors is None:
         from app.engine.performance import calc_prefill_tokens_per_sec
         specs = _gpu_specs()
-        _prefill_factors = {}
+        factors: dict[str, float] = {}  # published only when complete: request threads race here
         for name, ref in REFERENCE_PREFILL.items():
             s = specs.get(name)
             if s:
@@ -219,9 +205,10 @@ def get_prefill_factor(gpu_name: str) -> float:
                     num_layers=_LLAMA3_70B_ARCH["num_layers"],
                     hidden_dim=_LLAMA3_70B_ARCH["hidden_dim"],
                 )
-                _prefill_factors[name] = ref / raw if raw > 0 else 1.0
+                factors[name] = ref / raw if raw > 0 else 1.0
             else:
-                _prefill_factors[name] = 1.0
+                factors[name] = 1.0
+        _prefill_factors = factors
     return _prefill_factors.get(gpu_name, 1.0)
 
 

@@ -19,6 +19,19 @@ class TestHealthEndpoint:
         assert r.status_code == 200
         assert r.json()["status"] == "ok"
 
+    def test_db_down_is_503_and_does_not_leak(self, client, monkeypatch):
+        class _Down:
+            def execute(self, *_):
+                raise RuntimeError("connection to ep-secret-host failed")
+
+            def close(self):
+                pass
+
+        monkeypatch.setattr("app.db.database.SessionLocal", _Down)
+        r = client.get("/health")
+        assert r.status_code == 503
+        assert "ep-secret-host" not in r.text
+
 
 class TestHardwareEndpoints:
     def test_list_all(self, client):
@@ -87,10 +100,7 @@ class TestCompareEndpoint:
     }
 
     def test_basic_comparison(self, client):
-        r = client.post("/api/compare", json=self.WORKLOAD["workload"])
-        if r.status_code == 422:
-            # Try nested format
-            r = client.post("/api/compare", json=self.WORKLOAD)
+        r = client.post("/api/compare", json=self.WORKLOAD)
         assert r.status_code == 200
         data = r.json()
         assert "results" in data
@@ -98,9 +108,7 @@ class TestCompareEndpoint:
         assert len(data["results"]) == 14  # All seeded GPUs (HTML + extras-only)
 
     def test_results_are_ranked(self, client):
-        r = client.post("/api/compare", json=self.WORKLOAD["workload"])
-        if r.status_code == 422:
-            r = client.post("/api/compare", json=self.WORKLOAD)
+        r = client.post("/api/compare", json=self.WORKLOAD)
         assert r.status_code == 200
         results = r.json()["results"]
         scores = [r["composite_score"] for r in results]
@@ -108,21 +116,63 @@ class TestCompareEndpoint:
 
     def test_fp8_precision(self, client):
         payload = {**self.WORKLOAD["workload"], "precision": "FP8"}
-        r = client.post("/api/compare", json=payload)
-        if r.status_code == 422:
-            r = client.post("/api/compare", json={"workload": payload})
+        r = client.post("/api/compare", json={"workload": payload})
         assert r.status_code == 200
 
     def test_large_model(self, client):
         payload = {**self.WORKLOAD["workload"], "model_params_b": 405}
-        r = client.post("/api/compare", json=payload)
-        if r.status_code == 422:
-            r = client.post("/api/compare", json={"workload": payload})
+        r = client.post("/api/compare", json={"workload": payload})
         assert r.status_code == 200
         results = r.json()["results"]
         for res in results:
             if res["topology"]:
                 assert res["topology"]["gpu_count"] >= 1
+
+
+class TestCalculateEndpoint:
+    def test_returns_one_result_per_gpu(self, client):
+        r = client.post("/api/calculate", json={"workload": {"model_params_b": 70}})
+        assert r.status_code == 200
+        assert len(r.json()) == 14
+
+    def test_constraints_are_optional_but_applied(self, client):
+        body = {
+            "workload": {"model_params_b": 70},
+            "constraints": {"max_lead_time_weeks": 0},
+        }
+        r = client.post("/api/calculate", json=body)
+        assert r.status_code == 200
+        assert any("LEAD_TIME_EXCEEDED" in g["violation_codes"] for g in r.json())
+
+
+class TestInputValidation:
+    """Bad input is a 422, never a 500 or a silently wrong answer."""
+
+    @pytest.mark.parametrize("workload", [
+        {"model_params_b": 0},
+        {"model_params_b": -70},
+        {"model_params_b": 1e300},
+        {"model_params_b": 70, "concurrent_users": 0},
+        {"model_params_b": 70, "concurrent_users": -5},
+        {"model_params_b": 70, "context_length": 0},
+        {"model_params_b": 70, "precision": "INT8"},
+        {"model_params_b": 70, "workload_type": "gaming"},
+        {"model_params_b": 70, "is_moe": True, "num_experts": 8, "active_experts": 0},
+        {"model_params_b": 70, "is_moe": True, "num_experts": 8, "active_experts": 9},
+    ])
+    def test_bad_workload(self, client, workload):
+        assert client.post("/api/compare", json={"workload": workload}).status_code == 422
+
+    @pytest.mark.parametrize("constraints", [
+        {"amortization_months": 0},
+        {"cooling_type": "immersion"},
+        {"metric_weights": {"performance": -1.0}},
+        {"metric_weights": {"speed": 1.0}},
+        {"max_budget_usd": -1},
+    ])
+    def test_bad_constraints(self, client, constraints):
+        body = {"workload": {"model_params_b": 70}, "constraints": constraints}
+        assert client.post("/api/compare", json=body).status_code == 422
 
 
 class TestNetworkingEndpoint:

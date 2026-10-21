@@ -35,12 +35,16 @@ def calc_complexity(
     compatibility but no longer affects the score.
     """
     # Get software stack maturity
-    stack = (
-        db.query(SoftwareStack)
-        .filter(SoftwareStack.gpu_vendor == gpu.vendor)
-        .order_by(SoftwareStack.maturity_score.desc())
-        .first()
-    )
+    # Memoised on the session (one per request) — every GPU of a vendor shares it.
+    stacks = db.info.setdefault("best_stack_by_vendor", {})
+    if gpu.vendor not in stacks:
+        stacks[gpu.vendor] = (
+            db.query(SoftwareStack)
+            .filter(SoftwareStack.gpu_vendor == gpu.vendor)
+            .order_by(SoftwareStack.maturity_score.desc())
+            .first()
+        )
+    stack = stacks[gpu.vendor]
     base_score = stack.maturity_score if stack else 5
 
     penalties = 0.0
